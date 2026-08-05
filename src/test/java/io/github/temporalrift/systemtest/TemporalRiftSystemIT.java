@@ -1,0 +1,299 @@
+package io.github.temporalrift.systemtest;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.ArrayDeque;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+import org.junit.jupiter.api.Test;
+
+import io.github.temporalrift.systemtest.TemporalRiftScenario.ActiveEvent;
+import io.github.temporalrift.systemtest.TemporalRiftScenario.Card;
+import io.github.temporalrift.systemtest.TemporalRiftScenario.PlayerState;
+
+class TemporalRiftSystemIT {
+
+    private static final Map<String, String> SAFE_SPECIAL_BY_FACTION = Map.of(
+            "ERASERS", "ANNIHILATE",
+            "PROPHETS", "FORESIGHT",
+            "REVISIONISTS", "REWRITE");
+
+    private final TemporalRiftScenario scenario = new TemporalRiftScenario();
+
+    @Test
+    void securedApiRejectsMissingBearerToken() {
+        scenario.createLobbyWithoutAuthentication("Anonymous").assertStatus(401);
+    }
+
+    @Test
+    void lobbyLifecycleRejectsInvalidTransitionsAndTransfersHostBeforeClosing() {
+        var originalHost = Actor.named("Original host");
+        var transferredHost = Actor.named("Transferred host");
+        var latePlayer = Actor.named("Late player");
+
+        var created = scenario.as(originalHost).createLobby().assertStatus(201);
+        var lobbyId = UUID.fromString(created.body().path("lobbyId").asText());
+        assertThat(created.body().path("hostPlayerId").asText())
+                .isEqualTo(originalHost.playerId().toString());
+        assertThat(created.body().path("joinCode").asText()).isNotBlank();
+
+        var joined = scenario.as(transferredHost).joinLobby(lobbyId).assertStatus(200);
+        assertThat(joined.body().path("currentPlayers").size()).isEqualTo(2);
+
+        scenario.as(transferredHost).joinLobby(lobbyId).assertStatus(409);
+        scenario.as(originalHost).startGame(lobbyId).assertStatus(422);
+        scenario.as(transferredHost).startGame(lobbyId).assertStatus(403);
+
+        scenario.as(originalHost).leaveLobby(lobbyId).assertStatus(204);
+        scenario.as(transferredHost).startGame(lobbyId).assertStatus(422);
+        scenario.as(transferredHost).leaveLobby(lobbyId).assertStatus(204);
+        scenario.as(latePlayer).joinLobby(lobbyId).assertStatus(404);
+    }
+
+    @Test
+    void completeEraTraversesSessionActionTimelineScoringAndProjection() {
+        var host = Actor.named("Host");
+        var playerTwo = Actor.named("Player two");
+        var playerThree = Actor.named("Player three");
+        var outsider = Actor.named("Outsider");
+        var players = List.of(host, playerTwo, playerThree);
+
+        var created = scenario.as(host).createLobby().assertStatus(201);
+        var lobbyId = UUID.fromString(created.body().path("lobbyId").asText());
+
+        assertThat(scenario.as(playerTwo)
+                        .joinLobby(lobbyId)
+                        .assertStatus(200)
+                        .body()
+                        .path("currentPlayers")
+                        .size())
+                .isEqualTo(2);
+        assertThat(scenario.as(playerThree)
+                        .joinLobby(lobbyId)
+                        .assertStatus(200)
+                        .body()
+                        .path("currentPlayers")
+                        .size())
+                .isEqualTo(3);
+        scenario.as(playerTwo).startGame(lobbyId).assertStatus(403);
+
+        var started = scenario.as(host).startGame(lobbyId).assertStatus(202);
+        var gameId = UUID.fromString(started.body().path("gameId").asText());
+        assertThat(gameId).isNotEqualTo(lobbyId);
+
+        var initialStates = new LinkedHashMap<Actor, PlayerState>();
+        for (var player : players) {
+            var state = scenario.awaitPlayerState(
+                    player,
+                    gameId,
+                    candidate -> candidate.eraNumber() == 1
+                            && "ACTION_ROUND_1".equals(candidate.phase())
+                            && candidate.myFaction() != null
+                            && candidate.hand().size() == 5
+                            && candidate.activeEvents().size() == 3
+                            && candidate.players().size() == 3,
+                    player.name() + " receives private era-one state");
+            assertThat(state.gameId()).isEqualTo(gameId);
+            assertThat(state.players())
+                    .allSatisfy(view -> assertThat(view.faction()).isNull());
+            initialStates.put(player, state);
+        }
+        scenario.as(outsider).getPlayerState(gameId).assertStatus(404);
+
+        var originalEventIds = initialStates.get(host).activeEvents().stream()
+                .map(ActiveEvent::eventId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        var targetEvent = initialStates.get(host).activeEvents().getFirst();
+        var availableCards = new LinkedHashMap<Actor, ArrayDeque<Card>>();
+        initialStates.forEach((player, state) -> availableCards.put(player, new ArrayDeque<>(state.hand())));
+
+        assertRoundOpen(
+                gameId,
+                1,
+                1,
+                host,
+                0,
+                players.stream().map(Actor::playerId).collect(java.util.stream.Collectors.toSet()));
+
+        var hostFirstCard = availableCards.get(host).peekFirst();
+        scenario.as(host)
+                .playCard(
+                        gameId,
+                        1,
+                        1,
+                        hostFirstCard,
+                        UUID.randomUUID(),
+                        sourceOutcome(hostFirstCard, targetEvent),
+                        targetOutcome(targetEvent))
+                .assertStatus(422);
+        assertRoundOpen(
+                gameId,
+                1,
+                1,
+                host,
+                0,
+                players.stream().map(Actor::playerId).collect(java.util.stream.Collectors.toSet()));
+
+        playNextCard(host, availableCards, gameId, 1, 1, targetEvent).assertStatus(202);
+        assertRoundOpen(gameId, 1, 1, host, 1, Set.of(playerTwo.playerId(), playerThree.playerId()));
+
+        var hostDuplicateCard = availableCards.get(host).peekFirst();
+        scenario.as(host)
+                .playCard(
+                        gameId,
+                        1,
+                        1,
+                        hostDuplicateCard,
+                        targetEvent.eventId(),
+                        sourceOutcome(hostDuplicateCard, targetEvent),
+                        targetOutcome(targetEvent))
+                .assertStatus(409);
+        assertRoundOpen(gameId, 1, 1, host, 1, Set.of(playerTwo.playerId(), playerThree.playerId()));
+
+        playNextCard(playerTwo, availableCards, gameId, 1, 1, targetEvent).assertStatus(202);
+        assertRoundOpen(gameId, 1, 1, host, 2, Set.of(playerThree.playerId()));
+
+        var roundOneClosingResponse = playNextCard(playerThree, availableCards, gameId, 1, 1, targetEvent)
+                .assertStatus(202);
+        assertThat(roundOneClosingResponse.body().path("roundClosed").asBoolean())
+                .isTrue();
+        var closedRoundOne = scenario.awaitRoundState(host, gameId, 1, 1, state -> "CLOSED".equals(state.status()));
+        assertThat(closedRoundOne.submittedCount()).isEqualTo(3);
+        assertThat(closedRoundOne.pendingPlayerIds()).isEmpty();
+
+        var roundTwoState = scenario.awaitPlayerState(
+                host,
+                gameId,
+                candidate -> candidate.eraNumber() == 1 && "ACTION_ROUND_2".equals(candidate.phase()),
+                "round two is projected");
+        assertThat(roundTwoState.activeEvents()).hasSize(3);
+        assertRoundOpen(
+                gameId,
+                1,
+                2,
+                host,
+                0,
+                players.stream().map(Actor::playerId).collect(java.util.stream.Collectors.toSet()));
+
+        var specialPlayer = players.stream()
+                .filter(player -> SAFE_SPECIAL_BY_FACTION.containsKey(
+                        initialStates.get(player).myFaction()))
+                .findFirst()
+                .orElseThrow();
+        var special =
+                SAFE_SPECIAL_BY_FACTION.get(initialStates.get(specialPlayer).myFaction());
+        scenario.as(specialPlayer)
+                .playSpecial(gameId, 1, 2, special, targetEvent.eventId(), targetOutcome(targetEvent))
+                .assertStatus(202);
+        assertThat(special).isIn("ANNIHILATE", "FORESIGHT", "REWRITE");
+
+        var roundTwoCardPlayers =
+                players.stream().filter(player -> !player.equals(specialPlayer)).toList();
+        playNextCard(roundTwoCardPlayers.getFirst(), availableCards, gameId, 1, 2, targetEvent)
+                .assertStatus(202);
+        var roundTwoClosingResponse = playNextCard(
+                        roundTwoCardPlayers.getLast(), availableCards, gameId, 1, 2, targetEvent)
+                .assertStatus(202);
+        assertThat(roundTwoClosingResponse.body().path("roundClosed").asBoolean())
+                .isTrue();
+        var closedRoundTwo = scenario.awaitRoundState(host, gameId, 1, 2, state -> "CLOSED".equals(state.status()));
+        assertThat(closedRoundTwo.submittedCount()).isEqualTo(3);
+
+        scenario.awaitPlayerState(
+                host,
+                gameId,
+                candidate -> candidate.eraNumber() == 1 && "ACTION_ROUND_3".equals(candidate.phase()),
+                "round three is projected");
+        assertRoundOpen(
+                gameId,
+                1,
+                3,
+                host,
+                0,
+                players.stream().map(Actor::playerId).collect(java.util.stream.Collectors.toSet()));
+
+        playNextCard(host, availableCards, gameId, 1, 3, targetEvent).assertStatus(202);
+        playNextCard(playerTwo, availableCards, gameId, 1, 3, targetEvent).assertStatus(202);
+        assertRoundOpen(gameId, 1, 3, host, 2, Set.of(playerThree.playerId()));
+
+        var timedOutRound = scenario.awaitRoundState(host, gameId, 1, 3, state -> "CLOSED".equals(state.status()));
+        assertThat(timedOutRound.submittedCount()).isEqualTo(2);
+        assertThat(timedOutRound.pendingPlayerIds()).isEmpty();
+
+        var scores = scenario.awaitScores(
+                host,
+                gameId,
+                scoreBoard -> scoreBoard.eraNumber() == 1
+                        && scoreBoard
+                                .scores()
+                                .keySet()
+                                .containsAll(
+                                        players.stream().map(Actor::playerId).toList()));
+        assertThat(scores.scores()).hasSize(3);
+
+        for (var player : players) {
+            var eraTwoState = scenario.awaitPlayerState(
+                    player,
+                    gameId,
+                    candidate -> candidate.eraNumber() == 2
+                            && "ACTION_ROUND_1".equals(candidate.phase())
+                            && candidate.hand().size() == 5
+                            && candidate.activeEvents().size() == 3
+                            && candidate.activeEvents().stream()
+                                    .map(ActiveEvent::eventId)
+                                    .noneMatch(originalEventIds::contains),
+                    player.name() + " receives era-two projection after resolution and scoring");
+            assertThat(eraTwoState.myScore()).isEqualTo(scores.scores().get(player.playerId()));
+            assertThat(eraTwoState.players())
+                    .filteredOn(view -> view.playerId().equals(player.playerId()))
+                    .singleElement()
+                    .satisfies(view -> assertThat(view.score()).isEqualTo(eraTwoState.myScore()));
+        }
+    }
+
+    private JsonHttpClient.Response playNextCard(
+            Actor player,
+            Map<Actor, ArrayDeque<Card>> availableCards,
+            UUID gameId,
+            int eraNumber,
+            int roundNumber,
+            ActiveEvent targetEvent) {
+        var card = availableCards.get(player).removeFirst();
+        return scenario.as(player)
+                .playCard(
+                        gameId,
+                        eraNumber,
+                        roundNumber,
+                        card,
+                        targetEvent.eventId(),
+                        sourceOutcome(card, targetEvent),
+                        targetOutcome(targetEvent));
+    }
+
+    private void assertRoundOpen(
+            UUID gameId, int eraNumber, int roundNumber, Actor observer, int submittedCount, Set<UUID> pendingPlayers) {
+        var state = scenario.awaitRoundState(
+                observer,
+                gameId,
+                eraNumber,
+                roundNumber,
+                candidate -> "OPEN".equals(candidate.status())
+                        && candidate.submittedCount() == submittedCount
+                        && Set.copyOf(candidate.pendingPlayerIds()).equals(pendingPlayers));
+        assertThat(state.totalPlayers()).isEqualTo(3);
+        assertThat(state.eraNumber()).isEqualTo(eraNumber);
+        assertThat(state.roundNumber()).isEqualTo(roundNumber);
+    }
+
+    private static UUID targetOutcome(ActiveEvent event) {
+        return event.outcomeIds().getFirst();
+    }
+
+    private static UUID sourceOutcome(Card card, ActiveEvent event) {
+        return "SWING".equals(card.cardType()) ? event.outcomeIds().get(1) : null;
+    }
+}

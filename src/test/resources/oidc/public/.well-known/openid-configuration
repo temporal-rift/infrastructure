@@ -1,0 +1,7 @@
+{
+  "issuer": "http://e2e-auth",
+  "jwks_uri": "http://e2e-auth/jwks.json",
+  "id_token_signing_alg_values_supported": ["RS256"],
+  "subject_types_supported": ["public"],
+  "response_types_supported": ["id_token"]
+}

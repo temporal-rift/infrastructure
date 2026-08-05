@@ -1,0 +1,47 @@
+services:
+  postgres:
+    ports: !override []
+
+  kafka:
+    ports: !override []
+
+  kafka-ui:
+    ports: !override []
+
+  zipkin:
+    ports: !override []
+
+  e2e-auth:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./src/test/resources/oidc/public:/usr/share/nginx/html:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://127.0.0.1/.well-known/openid-configuration"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  game-service:
+    ports: !override
+      - "18080:8080"
+    environment:
+      JWT_ISSUER_URI: http://e2e-auth
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
+      SPRING_APPLICATION_JSON: >-
+        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8}}}}
+    depends_on:
+      e2e-auth:
+        condition: service_healthy
+
+  read-service:
+    ports: !override
+      - "18082:8080"
+    environment:
+      JWT_ISSUER_URI: http://e2e-auth
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
+    depends_on:
+      e2e-auth:
+        condition: service_healthy
+
+  timeline-service:
+    ports: !override []

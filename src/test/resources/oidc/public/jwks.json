@@ -1,0 +1,12 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "kid": "temporal-rift-e2e",
+      "alg": "RS256",
+      "n": "4XPIqDm8ZYxyKyJ17mVSuHGCIeA-96Xkmd0rALG7ljZ5_4w0y7r8ny6lMoCLW_Gz2PaDwbQvgjE1iUmeKmzdggb_NPTkHZ0jBz8b0pmDI0efThnWY6iE6bMvrIbzh95zBo-kL4-iFo4VH0PRsUd6KCbKJ2PTKdBYuNDkt0Dfrgyl9iNiDPZIiuHbyxCx9v5s5ksaF9tKzkIlQcoXi2atALjkwesOC4gEWLLilverCT4fLVBCB5upou2t9JYaNCn7znpSCuxeVStXgOU9Gce5aKvbq9Zysu3gzsmHotRR4pbozL3ZGe0WGSKnax00eMu8wxaK5QpZ8XbkB48I97OOaQ",
+      "e": "AQAB"
+    }
+  ]
+}

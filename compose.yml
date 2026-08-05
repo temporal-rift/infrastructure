@@ -1,0 +1,143 @@
+name: temporal-rift
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: temporal_rift
+      POSTGRES_USER: temporal_rift
+      POSTGRES_PASSWORD: temporal_rift
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../game-service/infrastructure/postgres/001-create-service-databases.sql:/docker-entrypoint-initdb.d/001-create-service-databases.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal_rift -d temporal_rift"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: apache/kafka:3.7.0
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  kafka-topics:
+    image: apache/kafka:3.7.0
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        for topic in game.events timeline.events game.commands game.dlq; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
+            --topic "$${topic}" --partitions 3 --replication-factor 1
+        done
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    ports:
+      - "8083:8080"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  zipkin:
+    image: openzipkin/zipkin
+    ports:
+      - "9411:9411"
+
+  game-service:
+    build:
+      context: ../game-service
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/game_service
+      SPRING_DATASOURCE_USERNAME: temporal_rift
+      SPRING_DATASOURCE_PASSWORD: temporal_rift
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://host.docker.internal:9000}
+      ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+      zipkin:
+        condition: service_healthy
+
+  timeline-service:
+    build:
+      context: ../timeline-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/timeline_service
+      SPRING_DATASOURCE_USERNAME: temporal_rift
+      SPRING_DATASOURCE_PASSWORD: temporal_rift
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      PORT: 8080
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+      zipkin:
+        condition: service_healthy
+
+  read-service:
+    build:
+      context: ../read-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/read_service
+      SPRING_DATASOURCE_USERNAME: temporal_rift
+      SPRING_DATASOURCE_PASSWORD: temporal_rift
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://host.docker.internal:9000}
+      ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      PORT: 8080
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+      zipkin:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
