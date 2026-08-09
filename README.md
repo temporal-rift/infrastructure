@@ -109,7 +109,7 @@ assertThat(round.pendingPlayerIds()).containsExactlyInAnyOrder(playerTwo.playerI
 | Action rounds | Forged target rejection; card acceptance; duplicate submission rejection; eligible faction special; all-submitted close; timer close with a skipped player |
 | Timeline and scoring | Round 3 → resolution; terminal outcomes; three-player score publication; game-service/read-service score parity |
 | Era continuation | Era 2 projection contains a replaced five-card hand and a new three-event set |
-| Centralized logs | All three service tags visible in Seq; traced request log exposes `traceId` and `spanId` |
+| Centralized logs | All three service tags visible in Seq; at least one event has non-blank `traceId` and `spanId` |
 
 The system test intentionally complements, rather than duplicates, exhaustive aggregate and adapter tests in each
 service. It concentrates on behavior that crosses process, database, or Kafka boundaries.

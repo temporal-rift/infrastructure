@@ -298,15 +298,21 @@ class TemporalRiftSystemIT {
         var serviceTags = new HashSet<String>();
         var tracedEventFound = false;
         for (var event : response.body()) {
-            var propertyNames = new HashSet<String>();
+            var traceId = "";
+            var spanId = "";
             for (var property : event.path("Properties")) {
                 var propertyName = property.path("Name").asText();
-                propertyNames.add(propertyName);
                 if ("tag".equals(propertyName)) {
                     serviceTags.add(property.path("Value").asText());
                 }
+                if ("traceId".equals(propertyName)) {
+                    traceId = property.path("Value").asText();
+                }
+                if ("spanId".equals(propertyName)) {
+                    spanId = property.path("Value").asText();
+                }
             }
-            tracedEventFound |= propertyNames.contains("traceId") && propertyNames.contains("spanId");
+            tracedEventFound |= !traceId.isBlank() && !spanId.isBlank();
         }
 
         assertThat(serviceTags).contains("game-service", "timeline-service", "read-service");
