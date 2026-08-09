@@ -11,6 +11,14 @@ services:
   zipkin:
     ports: !override []
 
+  seq:
+    ports: !override
+      - "15341:80"
+
+  seq-input-gelf:
+    ports: !override
+      - "22201:12201/udp"
+
   e2e-auth:
     image: nginx:1.27-alpine
     volumes:
@@ -27,11 +35,15 @@ services:
     environment:
       JWT_ISSUER_URI: http://e2e-auth
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: DEBUG
       SPRING_APPLICATION_JSON: >-
         {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8}}}}
     depends_on:
       e2e-auth:
         condition: service_healthy
+    logging:
+      options:
+        gelf-address: udp://127.0.0.1:22201
 
   read-service:
     ports: !override
@@ -42,6 +54,12 @@ services:
     depends_on:
       e2e-auth:
         condition: service_healthy
+    logging:
+      options:
+        gelf-address: udp://127.0.0.1:22201
 
   timeline-service:
     ports: !override []
+    logging:
+      options:
+        gelf-address: udp://127.0.0.1:22201

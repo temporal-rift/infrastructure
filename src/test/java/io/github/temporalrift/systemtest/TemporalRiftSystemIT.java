@@ -1,8 +1,12 @@
 package io.github.temporalrift.systemtest;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
+import java.net.URI;
+import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,12 +21,25 @@ import io.github.temporalrift.systemtest.TemporalRiftScenario.PlayerState;
 
 class TemporalRiftSystemIT {
 
+    private static final URI GAME_HEALTH_URI = URI.create("http://localhost:18080/actuator/health");
+    private static final URI SEQ_EVENTS_URI = URI.create("http://localhost:15341/api/events?count=5000");
+
     private static final Map<String, String> SAFE_SPECIAL_BY_FACTION = Map.of(
             "ERASERS", "ANNIHILATE",
             "PROPHETS", "FORESIGHT",
             "REVISIONISTS", "REWRITE");
 
     private final TemporalRiftScenario scenario = new TemporalRiftScenario();
+    private final JsonHttpClient httpClient = new JsonHttpClient();
+
+    @Test
+    void seqCentralizesServiceLogsAndExposesTraceContext() {
+        httpClient.get(GAME_HEALTH_URI, null).assertStatus(200);
+
+        await().atMost(Duration.ofSeconds(30))
+                .pollInterval(Duration.ofSeconds(1))
+                .untilAsserted(this::assertCentralizedLogMetadata);
+    }
 
     @Test
     void securedApiRejectsMissingBearerToken() {
@@ -272,6 +289,30 @@ class TemporalRiftSystemIT {
                         targetEvent.eventId(),
                         sourceOutcome(card, targetEvent),
                         targetOutcome(targetEvent));
+    }
+
+    private void assertCentralizedLogMetadata() {
+        var response = httpClient.get(SEQ_EVENTS_URI, null).assertStatus(200);
+        assertThat(response.body().isArray()).isTrue();
+
+        var serviceTags = new HashSet<String>();
+        var tracedEventFound = false;
+        for (var event : response.body()) {
+            var propertyNames = new HashSet<String>();
+            for (var property : event.path("Properties")) {
+                var propertyName = property.path("Name").asText();
+                propertyNames.add(propertyName);
+                if ("tag".equals(propertyName)) {
+                    serviceTags.add(property.path("Value").asText());
+                }
+            }
+            tracedEventFound |= propertyNames.contains("traceId") && propertyNames.contains("spanId");
+        }
+
+        assertThat(serviceTags).contains("game-service", "timeline-service", "read-service");
+        assertThat(tracedEventFound)
+                .as("at least one centralized log event contains traceId and spanId")
+                .isTrue();
     }
 
     private void assertRoundOpen(
