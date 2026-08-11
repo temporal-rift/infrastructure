@@ -118,22 +118,23 @@ jobs:
         working-directory: infrastructure
         run: mvn --batch-mode verify -Pe2e
 
-      # Capture before teardown — the containers are gone after the next step.
-      - name: Capture service logs
+      # The mvn step above already ran teardown by the time it returns — Failsafe's verify goal
+      # (which is what actually fails the build) runs at the `verify` phase, after
+      # post-integration-test's stop-system-under-test already tore the stack down. So this step
+      # cannot query live containers; it only collects what Maven's own capture-e2e-diagnostics
+      # execution already wrote to target/e2e-diagnostics while the stack still existed.
+      - name: Collect diagnostics
         if: failure()
         working-directory: infrastructure
         run: |
           mkdir -p ../e2e-diagnostics
-          docker compose -p temporal-rift-e2e -f compose.yml -f src/test/resources/compose.e2e.yml \
-            logs --no-color --timestamps > ../e2e-diagnostics/compose-logs.txt 2>&1 || true
-          docker compose -p temporal-rift-e2e -f compose.yml -f src/test/resources/compose.e2e.yml \
-            ps --all > ../e2e-diagnostics/compose-ps.txt 2>&1 || true
+          cp -r target/e2e-diagnostics/. ../e2e-diagnostics/ 2>/dev/null || true
           cp -r target/failsafe-reports ../e2e-diagnostics/failsafe-reports 2>/dev/null || true
           cp -r target/surefire-reports ../e2e-diagnostics/surefire-reports 2>/dev/null || true
 
       - name: Upload diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: system-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: e2e-diagnostics

@@ -115,6 +115,13 @@ On failure the run publishes a `system-e2e-diagnostics-*` artifact containing th
 the container state at failure, and the Failsafe/Surefire reports — enough to identify which service and which
 asserted transition failed without reproducing locally. Nothing is uploaded on a green run.
 
+The Compose logs and container state are captured by a Maven execution bound to the `e2e` profile's
+`post-integration-test` phase, ordered before `stop-system-under-test`. That ordering matters: Failsafe records test
+failures at the `integration-test` phase without failing the build, and only fails it later at `verify` — so the
+stack is already torn down by the time a single `mvn verify -Pe2e` invocation returns control to a shell. Capturing
+from the workflow after that point would find nothing; capturing inside the build, before teardown, is what makes the
+artifact meaningful.
+
 Teardown always runs, including on cancellation, and is scoped to the `temporal-rift-e2e` Compose project name, so it
 removes exactly what the run created and cannot disturb any other stack on the runner.
 
