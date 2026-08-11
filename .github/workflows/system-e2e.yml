@@ -97,6 +97,11 @@ jobs:
             exit 1
           fi
 
+      # checkout-enabled defaults to true and performs its own internal checkout of this repo at
+      # the workspace root — deleting the workspace's contents first. That destroys the sibling
+      # checkouts above (infrastructure/, game-service/, timeline-service/, read-service/) that
+      # Compose's ../<service> build contexts depend on. We already checked infrastructure out
+      # ourselves, so disable it here.
       - name: Setup Maven Action
         uses: s4u/setup-maven-action@ba34de01b7f4ba2ab8e2860df8993a29f4477056 # v1.20.0
         with:
@@ -104,6 +109,7 @@ jobs:
           java-distribution: temurin
           maven-version: 3.9.13
           settings-githubServer: false
+          checkout-enabled: false
 
       # Keyed on all four repositories' POMs — a dependency bump in any of them
       # must not reuse a stale cache.
