@@ -118,16 +118,29 @@ jobs:
         working-directory: infrastructure
         run: mvn --batch-mode verify -Pe2e
 
-      # The mvn step above already ran teardown by the time it returns — Failsafe's verify goal
-      # (which is what actually fails the build) runs at the `verify` phase, after
-      # post-integration-test's stop-system-under-test already tore the stack down. So this step
-      # cannot query live containers; it only collects what Maven's own capture-e2e-diagnostics
-      # execution already wrote to target/e2e-diagnostics while the stack still existed.
+      # For a test failure, Failsafe's verify goal (which actually fails the build) runs at the
+      # `verify` phase, after post-integration-test's capture-e2e-diagnostics has already written
+      # target/e2e-diagnostics — so this step normally just collects that output.
+      #
+      # But a failure in pre-integration-test (start-system-under-test itself, e.g. a container
+      # never becoming healthy) halts the build there: Maven never reaches post-integration-test,
+      # so capture-e2e-diagnostics never runs and target/e2e-diagnostics never exists — yet this is
+      # exactly when there's most to diagnose. Nothing has torn the stack down at that point either
+      # (stop-system-under-test is also post-integration-test, and the workflow's own teardown step
+      # below hasn't run yet), so a direct fallback capture here can still reach live containers.
       - name: Collect diagnostics
         if: failure()
         working-directory: infrastructure
         run: |
           mkdir -p ../e2e-diagnostics
+          if [ ! -f target/e2e-diagnostics/compose-ps.txt ]; then
+            echo "target/e2e-diagnostics/compose-ps.txt missing — Maven's capture execution did not run (pre-integration-test failure). Falling back to direct capture."
+            sh src/test/resources/capture-e2e-diagnostics.sh || true
+          fi
+          if [ ! -f target/e2e-diagnostics/compose-ps.txt ]; then
+            echo "::error::Unable to capture diagnostics — compose-ps.txt still missing after fallback capture"
+            exit 1
+          fi
           cp -r target/e2e-diagnostics/. ../e2e-diagnostics/ 2>/dev/null || true
           cp -r target/failsafe-reports ../e2e-diagnostics/failsafe-reports 2>/dev/null || true
           cp -r target/surefire-reports ../e2e-diagnostics/surefire-reports 2>/dev/null || true
