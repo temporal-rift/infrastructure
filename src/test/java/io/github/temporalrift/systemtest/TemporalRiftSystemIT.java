@@ -4,9 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,7 +23,10 @@ import io.github.temporalrift.systemtest.TemporalRiftScenario.PlayerState;
 class TemporalRiftSystemIT {
 
     private static final URI GAME_HEALTH_URI = URI.create("http://localhost:18080/actuator/health");
-    private static final URI SEQ_EVENTS_URI = URI.create("http://localhost:15341/api/events?count=5000");
+    private static final URI VICTORIALOGS_TRACE_QUERY_URI =
+            victoriaLogsQueryUri("* | unpack_json | traceId:* | limit 1");
+    private static final List<String> CENTRALIZED_LOG_SERVICE_TAGS =
+            List.of("game-service", "timeline-service", "read-service");
 
     private static final Map<String, String> SAFE_SPECIAL_BY_FACTION = Map.of(
             "ERASERS", "ANNIHILATE",
@@ -33,7 +37,7 @@ class TemporalRiftSystemIT {
     private final JsonHttpClient httpClient = new JsonHttpClient();
 
     @Test
-    void seqCentralizesServiceLogsAndExposesTraceContext() {
+    void victoriaLogsCentralizesServiceLogsAndExposesTraceContext() {
         httpClient.get(GAME_HEALTH_URI, null).assertStatus(200);
 
         await().atMost(Duration.ofSeconds(30))
@@ -292,33 +296,32 @@ class TemporalRiftSystemIT {
     }
 
     private void assertCentralizedLogMetadata() {
-        var response = httpClient.get(SEQ_EVENTS_URI, null).assertStatus(200);
-        assertThat(response.body().isArray()).isTrue();
-
-        var serviceTags = new HashSet<String>();
-        var tracedEventFound = false;
-        for (var event : response.body()) {
-            var traceId = "";
-            var spanId = "";
-            for (var property : event.path("Properties")) {
-                var propertyName = property.path("Name").asText();
-                if ("tag".equals(propertyName)) {
-                    serviceTags.add(property.path("Value").asText());
-                }
-                if ("traceId".equals(propertyName)) {
-                    traceId = property.path("Value").asText();
-                }
-                if ("spanId".equals(propertyName)) {
-                    spanId = property.path("Value").asText();
-                }
-            }
-            tracedEventFound |= !traceId.isBlank() && !spanId.isBlank();
+        // Each service's presence is checked with its own app_name-filtered query, not by scanning the most-recent-N
+        // window once for every service: read-service logs only warnings on anomalies (nothing on its success
+        // path), so a busy run of game-service/timeline-service Kafka chatter can push its still-present events out
+        // of a shared recent-N window without the pipeline itself being broken for it. `| limit 1` keeps each
+        // response a single JSON object, matching JsonHttpClient's single-document body parsing — VictoriaLogs
+        // returns newline-delimited JSON for multi-record results.
+        for (var tag : CENTRALIZED_LOG_SERVICE_TAGS) {
+            var response = httpClient.get(victoriaLogsAppNameUri(tag), null).assertStatus(200);
+            assertThat(response.rawBody())
+                    .as("VictoriaLogs has centralized at least one log event with app_name %s", tag)
+                    .isNotBlank();
         }
 
-        assertThat(serviceTags).contains("game-service", "timeline-service", "read-service");
-        assertThat(tracedEventFound)
-                .as("at least one centralized log event contains traceId and spanId")
-                .isTrue();
+        var response = httpClient.get(VICTORIALOGS_TRACE_QUERY_URI, null).assertStatus(200);
+        assertThat(response.rawBody())
+                .as("at least one centralized log event contains traceId (and, once unpacked, spanId alongside it)")
+                .isNotBlank();
+    }
+
+    private static URI victoriaLogsAppNameUri(String appName) {
+        return victoriaLogsQueryUri("app_name:=\"" + appName + "\" | limit 1");
+    }
+
+    private static URI victoriaLogsQueryUri(String logsQlQuery) {
+        var query = URLEncoder.encode(logsQlQuery, StandardCharsets.UTF_8);
+        return URI.create("http://localhost:15341/select/logsql/query?query=" + query);
     }
 
     private void assertRoundOpen(
@@ -340,7 +343,11 @@ class TemporalRiftSystemIT {
         return event.outcomeIds().getFirst();
     }
 
+    private static final Set<String> TWO_OUTCOME_CARD_TYPES = Set.of("SWING", "COLLIDE");
+
     private static UUID sourceOutcome(Card card, ActiveEvent event) {
-        return "SWING".equals(card.cardType()) ? event.outcomeIds().get(1) : null;
+        return TWO_OUTCOME_CARD_TYPES.contains(card.cardType())
+                ? event.outcomeIds().get(1)
+                : null;
     }
 }

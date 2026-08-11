@@ -11,13 +11,10 @@ services:
   zipkin:
     ports: !override []
 
-  seq:
+  victorialogs:
     ports: !override
-      - "15341:80"
-
-  seq-input-gelf:
-    ports: !override
-      - "22201:12201/udp"
+      - "15341:9428"
+      - "22201:514"
 
   e2e-auth:
     image: nginx:1.27-alpine
@@ -43,7 +40,7 @@ services:
         condition: service_healthy
     logging:
       options:
-        gelf-address: udp://127.0.0.1:22201
+        syslog-address: tcp://127.0.0.1:22201
 
   read-service:
     ports: !override
@@ -56,10 +53,10 @@ services:
         condition: service_healthy
     logging:
       options:
-        gelf-address: udp://127.0.0.1:22201
+        syslog-address: tcp://127.0.0.1:22201
 
   timeline-service:
     ports: !override []
     logging:
       options:
-        gelf-address: udp://127.0.0.1:22201
+        syslog-address: tcp://127.0.0.1:22201
