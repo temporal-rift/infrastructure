@@ -73,30 +73,15 @@ services:
     ports:
       - "9411:9411"
 
-  seq:
-    image: datalust/seq:2026.1
-    environment:
-      ACCEPT_EULA: Y
-      SEQ_FIRSTRUN_NOAUTHENTICATION: "True"
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.52.0
+    command:
+      - "-syslog.listenAddr.tcp=:514"
     volumes:
-      - seq-data:/data
+      - victorialogs-data:/victoria-logs-data
     ports:
-      - "5341:80"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://localhost/health"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-
-  seq-input-gelf:
-    image: datalust/seq-input-gelf:4.0
-    environment:
-      SEQ_ADDRESS: http://seq:5341
-    ports:
-      - "12201:12201/udp"
-    depends_on:
-      seq:
-        condition: service_healthy
+      - "9428:9428"
+      - "514:514"
 
   game-service:
     build:
@@ -121,13 +106,13 @@ services:
         condition: service_completed_successfully
       zipkin:
         condition: service_healthy
-      seq-input-gelf:
+      victorialogs:
         condition: service_started
     logging:
-      driver: gelf
+      driver: syslog
       options:
-        gelf-address: udp://127.0.0.1:12201
-        gelf-compression-type: none
+        syslog-address: tcp://127.0.0.1:514
+        syslog-format: rfc5424
         tag: game-service
 
   timeline-service:
@@ -151,13 +136,13 @@ services:
         condition: service_completed_successfully
       zipkin:
         condition: service_healthy
-      seq-input-gelf:
+      victorialogs:
         condition: service_started
     logging:
-      driver: gelf
+      driver: syslog
       options:
-        gelf-address: udp://127.0.0.1:12201
-        gelf-compression-type: none
+        syslog-address: tcp://127.0.0.1:514
+        syslog-format: rfc5424
         tag: timeline-service
 
   read-service:
@@ -182,15 +167,15 @@ services:
         condition: service_completed_successfully
       zipkin:
         condition: service_healthy
-      seq-input-gelf:
+      victorialogs:
         condition: service_started
     logging:
-      driver: gelf
+      driver: syslog
       options:
-        gelf-address: udp://127.0.0.1:12201
-        gelf-compression-type: none
+        syslog-address: tcp://127.0.0.1:514
+        syslog-format: rfc5424
         tag: read-service
 
 volumes:
   postgres-data:
-  seq-data:
+  victorialogs-data:
