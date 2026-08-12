@@ -271,7 +271,13 @@ class TemporalRiftSystemIT {
                                     .map(ActiveEvent::eventId)
                                     .noneMatch(originalEventIds::contains),
                     player.name() + " receives a later-era projection after resolution and scoring");
-            assertThat(laterEraState.myScore()).isEqualTo(scores.scores().get(player.playerId()));
+            // laterEraState may already be past era 2 (auto-closed by the same timer, same as era 2)
+            // by the time this is observed, and scoring is cumulative — so the comparison is against a
+            // fresh score fetch, not the era-1 snapshot captured above, which would under-count once a
+            // later era has also scored.
+            var latestScores = scenario.awaitScores(
+                    player, gameId, scoreBoard -> scoreBoard.scores().containsKey(player.playerId()));
+            assertThat(laterEraState.myScore()).isEqualTo(latestScores.scores().get(player.playerId()));
             assertThat(laterEraState.players())
                     .filteredOn(view -> view.playerId().equals(player.playerId()))
                     .singleElement()
