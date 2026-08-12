@@ -38,7 +38,7 @@ Query these with [LogsQL](https://docs.victoriametrics.com/victorialogs/logsql/)
 fields automatically — pipe the query through `| unpack_json` first to reach fields like `level`, `logger_name`,
 `traceId`, and `spanId`, for example:
 
-```
+```text
 app_name:="game-service" | unpack_json | traceId:"0123456789abcdef0123456789abcdef"
 ```
 

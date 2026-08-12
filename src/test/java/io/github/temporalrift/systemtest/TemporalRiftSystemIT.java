@@ -24,7 +24,7 @@ class TemporalRiftSystemIT {
 
     private static final URI GAME_HEALTH_URI = URI.create("http://localhost:18080/actuator/health");
     private static final URI VICTORIALOGS_TRACE_QUERY_URI =
-            victoriaLogsQueryUri("* | unpack_json | traceId:* | limit 1");
+            victoriaLogsQueryUri("* | unpack_json | traceId:* | spanId:* | limit 1");
     private static final List<String> CENTRALIZED_LOG_SERVICE_TAGS =
             List.of("game-service", "timeline-service", "read-service");
 

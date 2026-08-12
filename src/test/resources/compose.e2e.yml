@@ -13,8 +13,8 @@ services:
 
   victorialogs:
     ports: !override
-      - "15341:9428"
-      - "22201:514"
+      - "127.0.0.1:15341:9428"
+      - "127.0.0.1:22201:514"
 
   e2e-auth:
     image: nginx:1.27-alpine
