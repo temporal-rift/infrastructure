@@ -253,22 +253,35 @@ class TemporalRiftSystemIT {
         assertThat(scores.scores()).hasSize(3);
 
         for (var player : players) {
-            var eraTwoState = scenario.awaitPlayerState(
+            // Era 2 is only ever observed here, never played through — its rounds auto-close via the
+            // action-round timer. The live snapshot below is inherently racy against that timer (it may
+            // observe era 2 or, if the timer has already advanced the game further, a later era), so
+            // era 2's dealt hand is verified separately below through the durable history projection,
+            // which is unaffected by how far the live snapshot or the timer has progressed.
+            var laterEraState = scenario.awaitPlayerState(
                     player,
                     gameId,
-                    candidate -> candidate.eraNumber() == 2
-                            && "ACTION_ROUND_1".equals(candidate.phase())
-                            && candidate.hand().size() == 5
+                    candidate -> candidate.eraNumber() >= 2
                             && candidate.activeEvents().size() == 3
                             && candidate.activeEvents().stream()
                                     .map(ActiveEvent::eventId)
                                     .noneMatch(originalEventIds::contains),
-                    player.name() + " receives era-two projection after resolution and scoring");
-            assertThat(eraTwoState.myScore()).isEqualTo(scores.scores().get(player.playerId()));
-            assertThat(eraTwoState.players())
+                    player.name() + " receives a later-era projection after resolution and scoring");
+            assertThat(laterEraState.myScore()).isEqualTo(scores.scores().get(player.playerId()));
+            assertThat(laterEraState.players())
                     .filteredOn(view -> view.playerId().equals(player.playerId()))
                     .singleElement()
-                    .satisfies(view -> assertThat(view.score()).isEqualTo(eraTwoState.myScore()));
+                    .satisfies(view -> assertThat(view.score()).isEqualTo(laterEraState.myScore()));
+
+            var eraTwoHistory = scenario.awaitGameHistory(
+                    player,
+                    gameId,
+                    candidate -> candidate
+                            .era(2)
+                            .map(era -> era.myHand().size() == 5)
+                            .orElse(false),
+                    player.name() + " has a durable record of their era-two dealt hand");
+            assertThat(eraTwoHistory.era(2).orElseThrow().myHand()).hasSize(5);
         }
     }
 
@@ -340,7 +353,13 @@ class TemporalRiftSystemIT {
         return event.outcomeIds().getFirst();
     }
 
+    // SWING and COLLIDE both require a sourceOutcomeId distinct from the targetOutcomeId
+    // (game-service's SubmittedAction.TWO_OUTCOME_CARD_TYPES) — every other card type takes none.
+    private static final Set<String> TWO_OUTCOME_CARD_TYPES = Set.of("SWING", "COLLIDE");
+
     private static UUID sourceOutcome(Card card, ActiveEvent event) {
-        return "SWING".equals(card.cardType()) ? event.outcomeIds().get(1) : null;
+        return TWO_OUTCOME_CARD_TYPES.contains(card.cardType())
+                ? event.outcomeIds().get(1)
+                : null;
     }
 }
