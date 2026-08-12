@@ -80,8 +80,8 @@ services:
     volumes:
       - victorialogs-data:/victoria-logs-data
     ports:
-      - "9428:9428"
-      - "514:514"
+      - "127.0.0.1:9428:9428"
+      - "127.0.0.1:514:514"
 
   game-service:
     build:
