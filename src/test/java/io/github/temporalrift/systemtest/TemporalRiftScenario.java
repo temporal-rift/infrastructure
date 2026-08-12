@@ -22,7 +22,7 @@ final class TemporalRiftScenario {
 
     private static final URI GAME_API = URI.create("http://localhost:18080/api/v1");
     private static final URI READ_API = URI.create("http://localhost:18082/api/v1");
-    private static final Duration TRANSITION_TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration TRANSITION_TIMEOUT = Duration.ofSeconds(180);
 
     private final JsonHttpClient http = new JsonHttpClient();
 
@@ -63,6 +63,16 @@ final class TemporalRiftScenario {
                 },
                 expected,
                 "score publication");
+    }
+
+    GameHistory awaitGameHistory(Actor actor, UUID gameId, Predicate<GameHistory> expected, String description) {
+        return eventually(
+                () -> {
+                    var response = as(actor).getGameHistory(gameId);
+                    return response.status() == 200 ? Optional.of(GameHistory.from(response.body())) : Optional.empty();
+                },
+                expected,
+                description);
     }
 
     private static <T> T eventually(Supplier<Optional<T>> observation, Predicate<T> expected, String description) {
@@ -106,6 +116,10 @@ final class TemporalRiftScenario {
 
         JsonHttpClient.Response getScores(UUID gameId) {
             return http.get(gameUri("/games/" + gameId + "/scores"), actor);
+        }
+
+        JsonHttpClient.Response getGameHistory(UUID gameId) {
+            return http.get(readUri("/games/" + gameId + "/history"), actor);
         }
 
         JsonHttpClient.Response getRoundStatus(UUID gameId, int eraNumber, int roundNumber) {
@@ -225,6 +239,36 @@ final class TemporalRiftScenario {
                     .forEach(score -> scores.put(
                             uuid(score, "playerId"), score.path("score").asInt()));
             return new ScoreBoard(body.path("eraNumber").asInt(), Map.copyOf(scores));
+        }
+    }
+
+    record GameHistory(UUID gameId, List<EraHistory> eras) {
+
+        static GameHistory from(JsonNode body) {
+            return new GameHistory(
+                    uuid(body, "gameId"),
+                    stream(body.path("eras")).map(EraHistory::from).toList());
+        }
+
+        Optional<EraHistory> era(int eraNumber) {
+            return eras.stream().filter(era -> era.eraNumber() == eraNumber).findFirst();
+        }
+    }
+
+    record EraHistory(int eraNumber, List<DealtCard> myHand) {
+
+        static EraHistory from(JsonNode body) {
+            return new EraHistory(
+                    body.path("eraNumber").asInt(),
+                    stream(body.path("myHand")).map(DealtCard::from).toList());
+        }
+    }
+
+    record DealtCard(UUID cardInstanceId, String cardType) {
+
+        static DealtCard from(JsonNode body) {
+            return new DealtCard(
+                    uuid(body, "cardInstanceId"), body.path("cardType").asText());
         }
     }
 

@@ -90,6 +90,49 @@ docker compose -p temporal-rift-e2e -f compose.yml -f src/test/resources/compose
 The OIDC private key under `src/test/resources/oidc/` is deliberately checked-in test material. It signs only the
 short-lived tokens accepted by the isolated `e2e-auth` container and must never be used by a deployed environment.
 
+### Continuous enforcement
+
+`.github/workflows/system-e2e.yml` runs the same `mvn verify -Pe2e` command automatically. It checks out
+`infrastructure`, `game-service`, `timeline-service` and `read-service` as sibling directories — the layout Compose's
+`../<service>` build contexts require — so CI builds the services exactly as they are in version control.
+
+It triggers three ways:
+
+| Trigger | Sources used |
+|---|---|
+| Pull request or push to `main` in this repo | this repo at the triggering commit, the three services at `main` |
+| `workflow_call` with `service` and `ref` | the named service at that ref, the other repositories at `main` |
+| `workflow_call` with no inputs | every repository at `main` |
+
+A service repository invokes it like this:
+
+```yaml
+jobs:
+  system-e2e:
+    uses: temporal-rift/infrastructure/.github/workflows/system-e2e.yml@main
+    with:
+      service: game-service
+      ref: ${{ github.sha }}
+```
+
+The job is named `system-e2e`; branch protection's required check points at that name. Note this is a repository
+**setting**, not something the workflow file can assert — it has to be applied once in repository settings after the
+workflow has a green run on `main`.
+
+On failure the run publishes a `system-e2e-diagnostics-*` artifact containing the Compose logs for all services,
+the container state at failure, and the Failsafe/Surefire reports — enough to identify which service and which
+asserted transition failed without reproducing locally. Nothing is uploaded on a green run.
+
+The Compose logs and container state are captured by a Maven execution bound to the `e2e` profile's
+`post-integration-test` phase, ordered before `stop-system-under-test`. That ordering matters: Failsafe records test
+failures at the `integration-test` phase without failing the build, and only fails it later at `verify` — so the
+stack is already torn down by the time a single `mvn verify -Pe2e` invocation returns control to a shell. Capturing
+from the workflow after that point would find nothing; capturing inside the build, before teardown, is what makes the
+artifact meaningful.
+
+Teardown always runs, including on cancellation, and is scoped to the `temporal-rift-e2e` Compose project name, so it
+removes exactly what the run created and cannot disturb any other stack on the runner.
+
 ### Scenario DSL
 
 The scenarios bind actions to named actors and keep transport mechanics in `TemporalRiftScenario`. Commands return an

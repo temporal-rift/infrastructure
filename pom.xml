@@ -102,6 +102,25 @@
                                 </configuration>
                             </execution>
                             <execution>
+                                <!-- Must be declared before stop-system-under-test: both bind to
+                                     post-integration-test, and same-phase executions of one plugin run
+                                     in POM declaration order. Captures logs while the stack still exists —
+                                     Failsafe records failures without failing the build until the later
+                                     verify phase, so by then the stack below would already be gone. -->
+                                <id>capture-e2e-diagnostics</id>
+                                <phase>post-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>sh</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>src/test/resources/capture-e2e-diagnostics.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
                                 <id>stop-system-under-test</id>
                                 <phase>post-integration-test</phase>
                                 <goals>

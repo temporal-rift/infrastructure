@@ -1,0 +1,171 @@
+name: System E2E
+
+# Runs the black-box cross-service proof (`mvn verify -Pe2e`).
+#
+# The Compose topology builds service images from sibling directories (`../game-service` and friends),
+# so all four repositories are checked out side by side, mirroring the developer workspace layout
+# documented in README.md. That way CI runs the same command a developer runs locally.
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: >-
+          Repository name of the service under test (game-service, timeline-service or read-service).
+          Omit to run every repository at its default branch.
+        required: false
+        type: string
+        default: ''
+      ref:
+        description: Ref of the service under test. Ignored unless `service` is set.
+        required: false
+        type: string
+        default: ''
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One system proof at a time per triggering ref — the run holds fixed host ports.
+  group: system-e2e-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Stable job name — branch protection's required check points at "system-e2e".
+  system-e2e:
+    name: system-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      # `infrastructure` is the triggering repo only when this workflow runs on its own changes.
+      # Under workflow_call, github.repository is the *calling* service, so every checkout names
+      # its repository explicitly rather than relying on the default.
+      - name: Check out infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/infrastructure
+          ref: ${{ github.repository == 'temporal-rift/infrastructure' && github.sha || 'main' }}
+          path: infrastructure
+          persist-credentials: false
+
+      - name: Check out game-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/game-service
+          ref: ${{ inputs.service == 'game-service' && inputs.ref || 'main' }}
+          path: game-service
+          persist-credentials: false
+
+      - name: Check out timeline-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/timeline-service
+          ref: ${{ inputs.service == 'timeline-service' && inputs.ref || 'main' }}
+          path: timeline-service
+          persist-credentials: false
+
+      - name: Check out read-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/read-service
+          ref: ${{ inputs.service == 'read-service' && inputs.ref || 'main' }}
+          path: read-service
+          persist-credentials: false
+
+      - name: Report sources under test
+        run: |
+          echo "Service under test: ${INPUT_SERVICE:-<none — all repositories at default branch>}"
+          for repo in infrastructure game-service timeline-service read-service; do
+            echo "$repo $(git -C "$repo" rev-parse --short HEAD)"
+          done
+        env:
+          INPUT_SERVICE: ${{ inputs.service }}
+
+      # The e2e Compose override uses the `!override` tag, which needs Compose v2.24.4+.
+      # Fail loudly here rather than with an opaque parse error 20 minutes in.
+      - name: Verify Docker Compose supports the e2e override
+        run: |
+          version="$(docker compose version --short)"
+          echo "docker compose $version"
+          required=2.24.4
+          if [ "$(printf '%s\n%s\n' "$required" "$version" | sort -V | head -n1)" != "$required" ]; then
+            echo "::error::docker compose $version is older than the required $required"
+            exit 1
+          fi
+
+      # checkout-enabled defaults to true and performs its own internal checkout of this repo at
+      # the workspace root — deleting the workspace's contents first. That destroys the sibling
+      # checkouts above (infrastructure/, game-service/, timeline-service/, read-service/) that
+      # Compose's ../<service> build contexts depend on. We already checked infrastructure out
+      # ourselves, so disable it here.
+      - name: Setup Maven Action
+        uses: s4u/setup-maven-action@ba34de01b7f4ba2ab8e2860df8993a29f4477056 # v1.20.0
+        with:
+          java-version: 26
+          java-distribution: temurin
+          maven-version: 3.9.13
+          settings-githubServer: false
+          checkout-enabled: false
+
+      # Keyed on all four repositories' POMs — a dependency bump in any of them
+      # must not reuse a stale cache.
+      - name: Cache Maven packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-e2e-${{ hashFiles('*/pom.xml', '*/*/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-e2e-
+
+      - name: Run system E2E
+        working-directory: infrastructure
+        run: mvn --batch-mode verify -Pe2e
+
+      # For a test failure, Failsafe's verify goal (which actually fails the build) runs at the
+      # `verify` phase, after post-integration-test's capture-e2e-diagnostics has already written
+      # target/e2e-diagnostics — so this step normally just collects that output.
+      #
+      # But a failure in pre-integration-test (start-system-under-test itself, e.g. a container
+      # never becoming healthy) halts the build there: Maven never reaches post-integration-test,
+      # so capture-e2e-diagnostics never runs and target/e2e-diagnostics never exists — yet this is
+      # exactly when there's most to diagnose. Nothing has torn the stack down at that point either
+      # (stop-system-under-test is also post-integration-test, and the workflow's own teardown step
+      # below hasn't run yet), so a direct fallback capture here can still reach live containers.
+      - name: Collect diagnostics
+        if: failure()
+        working-directory: infrastructure
+        run: |
+          mkdir -p ../e2e-diagnostics
+          if [ ! -f target/e2e-diagnostics/compose-ps.txt ]; then
+            echo "target/e2e-diagnostics/compose-ps.txt missing — Maven's capture execution did not run (pre-integration-test failure). Falling back to direct capture."
+            sh src/test/resources/capture-e2e-diagnostics.sh || true
+          fi
+          if [ ! -f target/e2e-diagnostics/compose-ps.txt ]; then
+            echo "::error::Unable to capture diagnostics — compose-ps.txt still missing after fallback capture"
+            exit 1
+          fi
+          cp -r target/e2e-diagnostics/. ../e2e-diagnostics/ 2>/dev/null || true
+          cp -r target/failsafe-reports ../e2e-diagnostics/failsafe-reports 2>/dev/null || true
+          cp -r target/surefire-reports ../e2e-diagnostics/surefire-reports 2>/dev/null || true
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: system-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: e2e-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Failsafe's post-integration-test teardown does not run if the job is cancelled or the JVM dies.
+      # Scoped to the `temporal-rift-e2e` project name, so it removes exactly what this run created and
+      # cannot touch any other Compose project on the runner.
+      - name: Tear down system under test
+        if: always()
+        working-directory: infrastructure
+        run: |
+          docker compose -p temporal-rift-e2e -f compose.yml -f src/test/resources/compose.e2e.yml \
+            down -v --remove-orphans

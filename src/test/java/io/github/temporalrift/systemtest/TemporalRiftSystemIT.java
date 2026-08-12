@@ -257,22 +257,49 @@ class TemporalRiftSystemIT {
         assertThat(scores.scores()).hasSize(3);
 
         for (var player : players) {
-            var eraTwoState = scenario.awaitPlayerState(
+            // Era 2 is only ever observed here, never played through — its rounds auto-close via the
+            // action-round timer. The live snapshot below is inherently racy against that timer (it may
+            // observe era 2 or, if the timer has already advanced the game further, a later era), so
+            // era 2's dealt hand is verified separately below through the durable history projection,
+            // which is unaffected by how far the live snapshot or the timer has progressed.
+            //
+            // The score and hand-size checks are folded into this same predicate rather than compared
+            // afterward: read-service's projection can only ever lag game-service's authoritative total
+            // (never skip ahead of it), and dwells on each era's total for a full era (~25s at the e2e
+            // 8s round timer) versus this poll's 200ms interval — so waiting for the projection to reach
+            // era 1's already-known total, in the same snapshot where eraNumber first reaches 2, is
+            // race-free. Comparing against a value fetched *after* observing the later-era snapshot would
+            // invert the race instead of removing it, since game-service's authoritative total can move
+            // ahead again (era 2 also scores) in the time between the two reads. hand().size() == 5 is
+            // likewise race-free for eraNumber >= 2 — no card is ever played after era 1, so every era
+            // from 2 onward has a fresh, untouched 5-card hand — and is the only black-box proof that
+            // read-service replaces the projected hand each era instead of accumulating it.
+            var expectedScore = scores.scores().get(player.playerId());
+            var laterEraState = scenario.awaitPlayerState(
                     player,
                     gameId,
-                    candidate -> candidate.eraNumber() == 2
-                            && "ACTION_ROUND_1".equals(candidate.phase())
+                    candidate -> candidate.eraNumber() >= 2
                             && candidate.hand().size() == 5
+                            && candidate.myScore() == expectedScore
                             && candidate.activeEvents().size() == 3
                             && candidate.activeEvents().stream()
                                     .map(ActiveEvent::eventId)
                                     .noneMatch(originalEventIds::contains),
-                    player.name() + " receives era-two projection after resolution and scoring");
-            assertThat(eraTwoState.myScore()).isEqualTo(scores.scores().get(player.playerId()));
-            assertThat(eraTwoState.players())
+                    player.name() + " receives a later-era projection after resolution and scoring");
+            assertThat(laterEraState.players())
                     .filteredOn(view -> view.playerId().equals(player.playerId()))
                     .singleElement()
-                    .satisfies(view -> assertThat(view.score()).isEqualTo(eraTwoState.myScore()));
+                    .satisfies(view -> assertThat(view.score()).isEqualTo(laterEraState.myScore()));
+
+            var eraTwoHistory = scenario.awaitGameHistory(
+                    player,
+                    gameId,
+                    candidate -> candidate
+                            .era(2)
+                            .map(era -> era.myHand().size() == 5)
+                            .orElse(false),
+                    player.name() + " has a durable record of their era-two dealt hand");
+            assertThat(eraTwoHistory.era(2).orElseThrow().myHand()).hasSize(5);
         }
     }
 
