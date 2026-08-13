@@ -21,6 +21,22 @@ on:
         required: false
         type: string
         default: ''
+  # Manual ad-hoc runs (e.g. checking a hotfix branch against the other services' default branches
+  # before any pull request exists). Independent of workflow_call — same inputs, different caller.
+  workflow_dispatch:
+    inputs:
+      service:
+        description: >-
+          Repository name of the service under test (game-service, timeline-service or read-service).
+          Omit to run every repository at its default branch.
+        required: false
+        type: string
+        default: ''
+      ref:
+        description: Ref of the service under test. Ignored unless `service` is set.
+        required: false
+        type: string
+        default: ''
   pull_request:
   push:
     branches: [ main ]
