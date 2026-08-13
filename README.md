@@ -96,13 +96,14 @@ short-lived tokens accepted by the isolated `e2e-auth` container and must never 
 `infrastructure`, `game-service`, `timeline-service` and `read-service` as sibling directories — the layout Compose's
 `../<service>` build contexts require — so CI builds the services exactly as they are in version control.
 
-It triggers three ways:
+It triggers four ways:
 
 | Trigger | Sources used |
 |---|---|
 | Pull request or push to `main` in this repo | this repo at the triggering commit, the three services at `main` |
 | `workflow_call` with `service` and `ref` | the named service at that ref, the other repositories at `main` |
 | `workflow_call` with no inputs | every repository at `main` |
+| Manual `workflow_dispatch`, with `service` and `ref` | the named service at that ref, the other repositories at `main` — for ad-hoc runs outside any pull request |
 
 A service repository invokes it like this:
 

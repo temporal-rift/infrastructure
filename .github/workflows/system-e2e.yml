@@ -23,17 +23,26 @@ on:
         default: ''
   # Manual ad-hoc runs (e.g. checking a hotfix branch against the other services' default branches
   # before any pull request exists). Independent of workflow_call — same inputs, different caller.
+  #
+  # `service` is a `choice`, unlike workflow_call's free-form string: a hand-typed dispatch form has
+  # no equivalent of a caller's own repository name being correct by construction, so a typo here
+  # (`game_service`, trailing space, ...) would silently fall through to "every repository at main"
+  # and still report green, never having built the branch someone meant to test.
   workflow_dispatch:
     inputs:
       service:
         description: >-
-          Repository name of the service under test (game-service, timeline-service or read-service).
-          Omit to run every repository at its default branch.
+          Service under test. Leave as `all` to run every repository at its default branch.
         required: false
-        type: string
-        default: ''
+        type: choice
+        default: all
+        options:
+          - all
+          - game-service
+          - timeline-service
+          - read-service
       ref:
-        description: Ref of the service under test. Ignored unless `service` is set.
+        description: Ref of the service under test. Required unless `service` is `all`.
         required: false
         type: string
         default: ''
@@ -57,6 +66,16 @@ jobs:
     timeout-minutes: 45
 
     steps:
+      # A service named without a ref would silently fall through to 'main' for that service too
+      # (the checkout steps' `inputs.ref || 'main'` has no way to distinguish "test main on purpose"
+      # from "caller forgot to set ref") -- fail loudly here instead of reporting a green run that
+      # never built the branch someone meant to test.
+      - name: Validate service/ref inputs
+        if: inputs.service != '' && inputs.service != 'all' && inputs.ref == ''
+        run: |
+          echo "::error::service is set to '${{ inputs.service }}' but ref is empty -- every repository would silently run at 'main', including the one under test."
+          exit 1
+
       # `infrastructure` is the triggering repo only when this workflow runs on its own changes.
       # Under workflow_call, github.repository is the *calling* service, so every checkout names
       # its repository explicitly rather than relying on the default.
