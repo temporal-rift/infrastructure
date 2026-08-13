@@ -66,15 +66,18 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      # A service named without a ref would silently fall through to 'main' for that service too
-      # (the checkout steps' `inputs.ref || 'main'` has no way to distinguish "test main on purpose"
-      # from "caller forgot to set ref") -- fail loudly here instead of reporting a green run that
-      # never built the branch someone meant to test.
+      # service and ref must be given together -- either alone silently falls through to 'main' for
+      # the service under test (the checkout steps' `inputs.service == '<name>' && inputs.ref ||
+      # 'main'` has no way to distinguish "test main on purpose" from "operator forgot the other
+      # field") -- fail loudly here instead of reporting a deceptive green run.
       - name: Validate service/ref inputs
-        if: inputs.service != '' && inputs.service != 'all' && inputs.ref == ''
+        if: (inputs.service != '' && inputs.service != 'all' && inputs.ref == '') || ((inputs.service == '' || inputs.service == 'all') && inputs.ref != '')
         run: |
-          echo "::error::service is set to '${{ inputs.service }}' but ref is empty -- every repository would silently run at 'main', including the one under test."
+          echo "::error::service='${INPUT_SERVICE}' and ref='${INPUT_REF}' must be given together -- otherwise every repository silently runs at 'main' and the ref under test is never built."
           exit 1
+        env:
+          INPUT_SERVICE: ${{ inputs.service }}
+          INPUT_REF: ${{ inputs.ref }}
 
       # `infrastructure` is the triggering repo only when this workflow runs on its own changes.
       # Under workflow_call, github.repository is the *calling* service, so every checkout names
