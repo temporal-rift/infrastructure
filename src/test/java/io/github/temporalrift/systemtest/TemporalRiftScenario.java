@@ -145,6 +145,12 @@ final class TemporalRiftScenario {
             return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
         }
 
+        JsonHttpClient.Response selectHand(UUID gameId, int eraNumber, List<UUID> keptCardInstanceIds) {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("keptCardInstanceIds", keptCardInstanceIds);
+            return http.post(gameUri("/games/" + gameId + "/eras/" + eraNumber + "/hand-selection"), actor, body);
+        }
+
         JsonHttpClient.Response playSpecial(
                 UUID gameId,
                 int eraNumber,

@@ -106,6 +106,30 @@ class TemporalRiftSystemIT {
         var gameId = UUID.fromString(started.body().path("gameId").asText());
         assertThat(gameId).isNotEqualTo(lobbyId);
 
+        // Deal-7-keep-5 (game-service#121/#127): the private state's hand is a pending seven-card offer until
+        // each player selects the five they keep. Round 1 cannot open until every player has selected, so all
+        // three offers are awaited and selected before any player's post-selection state is awaited — awaiting
+        // the post-selection state per player in a single pass would deadlock the first player on a round-open
+        // signal that depends on selections this loop hasn't submitted yet for the other two.
+        var pendingOffers = new LinkedHashMap<Actor, PlayerState>();
+        for (var player : players) {
+            pendingOffers.put(
+                    player,
+                    scenario.awaitPlayerState(
+                            player,
+                            gameId,
+                            candidate -> candidate.eraNumber() == 1
+                                    && candidate.hand().size() == 7,
+                            player.name() + " receives the pending seven-card era-one deal"));
+        }
+        for (var player : players) {
+            var keptCardIds = pendingOffers.get(player).hand().stream()
+                    .map(Card::cardInstanceId)
+                    .limit(5)
+                    .toList();
+            scenario.as(player).selectHand(gameId, 1, keptCardIds).assertStatus(202);
+        }
+
         var initialStates = new LinkedHashMap<Actor, PlayerState>();
         for (var player : players) {
             var state = scenario.awaitPlayerState(
