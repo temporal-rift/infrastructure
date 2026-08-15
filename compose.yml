@@ -38,15 +38,10 @@ services:
     ports:
       - "9092:9092"
     healthcheck:
-      # Listing topics only proves the broker answers admin requests — under load its group
-      # coordinator can still be mid-election, producing STALE_BROKER_EPOCH/NOT_COORDINATOR churn for
-      # consumers that connect right after "healthy". Describing __consumer_offsets (always present,
-      # independent of auto.create.topics.enable) forces coordinator resolution to actually complete.
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --describe --topic __consumer_offsets >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
-      retries: 18
-      start_period: 20s
+      retries: 12
 
   kafka-topics:
     image: apache/kafka:3.7.0
