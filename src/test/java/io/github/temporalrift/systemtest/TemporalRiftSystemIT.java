@@ -83,6 +83,25 @@ class TemporalRiftSystemIT {
         var outsider = Actor.named("Outsider");
         var players = List.of(host, playerTwo, playerThree);
 
+        var gameId = startGameWithThreePlayers(host, playerTwo, playerThree);
+        dealAndSelectEraOneHands(gameId, players);
+
+        var initialStates = awaitEraOneStatesAndRejectOutsider(gameId, players, outsider);
+        var originalEventIds = initialStates.get(host).activeEvents().stream()
+                .map(ActiveEvent::eventId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        var targetEvent = initialStates.get(host).activeEvents().getFirst();
+        var availableCards = new LinkedHashMap<Actor, ArrayDeque<Card>>();
+        initialStates.forEach((player, state) -> availableCards.put(player, new ArrayDeque<>(state.hand())));
+
+        playEraOneRoundOne(gameId, host, playerTwo, playerThree, players, availableCards, targetEvent);
+        playEraOneRoundTwo(gameId, host, players, initialStates, availableCards, targetEvent);
+        playEraOneRoundThree(gameId, host, playerTwo, playerThree, players, availableCards, targetEvent);
+
+        verifyScoresAndLaterEraProjection(gameId, host, players, originalEventIds);
+    }
+
+    private UUID startGameWithThreePlayers(Actor host, Actor playerTwo, Actor playerThree) {
         var created = scenario.as(host).createLobby().assertStatus(201);
         var lobbyId = UUID.fromString(created.body().path("lobbyId").asText());
 
@@ -105,13 +124,17 @@ class TemporalRiftSystemIT {
         var started = scenario.as(host).startGame(lobbyId).assertStatus(202);
         var gameId = UUID.fromString(started.body().path("gameId").asText());
         assertThat(gameId).isNotEqualTo(lobbyId);
+        return gameId;
+    }
 
-        // Deal-7-keep-5 (game-service#121/#127, read-service#46): the seven-card deal arrives in
-        // pendingHandSelection, not myHand — myHand stays empty until the player's selection resolves, so the
-        // deal must be read from the pending field. Round 1 cannot open until every player has selected, so
-        // all three offers are awaited and selected before any player's post-selection state is awaited —
-        // awaiting the post-selection state per player in a single pass would deadlock the first player on a
-        // round-open signal that depends on selections this loop hasn't submitted yet for the other two.
+    // `hand` is the confirmed playable hand and `pendingHand` the unresolved seven-card deal — they are
+    // separate fields in the contract, not two states of one field. HandDealt fills only
+    // pendingHandSelection; myHand stays empty until HandSelected resolves the choice.
+    private void dealAndSelectEraOneHands(UUID gameId, List<Actor> players) {
+        // Round 1 cannot open until every player has selected, so all three offers are awaited and selected
+        // before any player's post-selection state is awaited — awaiting the post-selection state per player
+        // in a single pass would deadlock the first player on a round-open signal that depends on selections
+        // this loop hasn't submitted yet for the other two.
         var pendingOffers = new LinkedHashMap<Actor, PlayerState>();
         for (var player : players) {
             pendingOffers.put(
@@ -131,7 +154,10 @@ class TemporalRiftSystemIT {
                     .toList();
             scenario.as(player).selectHand(gameId, 1, keptCardIds).assertStatus(202);
         }
+    }
 
+    private Map<Actor, PlayerState> awaitEraOneStatesAndRejectOutsider(
+            UUID gameId, List<Actor> players, Actor outsider) {
         var initialStates = new LinkedHashMap<Actor, PlayerState>();
         for (var player : players) {
             var state = scenario.awaitPlayerState(
@@ -150,14 +176,17 @@ class TemporalRiftSystemIT {
             initialStates.put(player, state);
         }
         scenario.as(outsider).getPlayerState(gameId).assertStatus(404);
+        return initialStates;
+    }
 
-        var originalEventIds = initialStates.get(host).activeEvents().stream()
-                .map(ActiveEvent::eventId)
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
-        var targetEvent = initialStates.get(host).activeEvents().getFirst();
-        var availableCards = new LinkedHashMap<Actor, ArrayDeque<Card>>();
-        initialStates.forEach((player, state) -> availableCards.put(player, new ArrayDeque<>(state.hand())));
-
+    private void playEraOneRoundOne(
+            UUID gameId,
+            Actor host,
+            Actor playerTwo,
+            Actor playerThree,
+            List<Actor> players,
+            Map<Actor, ArrayDeque<Card>> availableCards,
+            ActiveEvent targetEvent) {
         assertRoundOpen(
                 gameId,
                 1,
@@ -211,7 +240,15 @@ class TemporalRiftSystemIT {
         var closedRoundOne = scenario.awaitRoundState(host, gameId, 1, 1, state -> "CLOSED".equals(state.status()));
         assertThat(closedRoundOne.submittedCount()).isEqualTo(3);
         assertThat(closedRoundOne.pendingPlayerIds()).isEmpty();
+    }
 
+    private void playEraOneRoundTwo(
+            UUID gameId,
+            Actor host,
+            List<Actor> players,
+            Map<Actor, PlayerState> initialStates,
+            Map<Actor, ArrayDeque<Card>> availableCards,
+            ActiveEvent targetEvent) {
         var roundTwoState = scenario.awaitPlayerState(
                 host,
                 gameId,
@@ -249,7 +286,16 @@ class TemporalRiftSystemIT {
                 .isTrue();
         var closedRoundTwo = scenario.awaitRoundState(host, gameId, 1, 2, state -> "CLOSED".equals(state.status()));
         assertThat(closedRoundTwo.submittedCount()).isEqualTo(3);
+    }
 
+    private void playEraOneRoundThree(
+            UUID gameId,
+            Actor host,
+            Actor playerTwo,
+            Actor playerThree,
+            List<Actor> players,
+            Map<Actor, ArrayDeque<Card>> availableCards,
+            ActiveEvent targetEvent) {
         scenario.awaitPlayerState(
                 host,
                 gameId,
@@ -270,7 +316,10 @@ class TemporalRiftSystemIT {
         var timedOutRound = scenario.awaitRoundState(host, gameId, 1, 3, state -> "CLOSED".equals(state.status()));
         assertThat(timedOutRound.submittedCount()).isEqualTo(2);
         assertThat(timedOutRound.pendingPlayerIds()).isEmpty();
+    }
 
+    private void verifyScoresAndLaterEraProjection(
+            UUID gameId, Actor host, List<Actor> players, Set<UUID> originalEventIds) {
         var scores = scenario.awaitScores(
                 host,
                 gameId,
