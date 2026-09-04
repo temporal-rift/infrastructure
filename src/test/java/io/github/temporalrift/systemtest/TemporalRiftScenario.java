@@ -167,12 +167,16 @@ final class TemporalRiftScenario {
         }
     }
 
+    // `hand` is the confirmed playable hand and `pendingHand` the unresolved seven-card deal — they are
+    // separate fields in the contract, not two states of one field. HandDealt fills only
+    // pendingHandSelection; myHand stays empty until HandSelected resolves the choice.
     record PlayerState(
             UUID gameId,
             int eraNumber,
             String phase,
             String myFaction,
             List<Card> hand,
+            List<Card> pendingHand,
             int myScore,
             List<ActiveEvent> activeEvents,
             List<PlayerView> players) {
@@ -184,6 +188,9 @@ final class TemporalRiftScenario {
                     body.path("phase").asText(),
                     nullableText(body.get("myFaction")),
                     stream(body.path("myHand")).map(Card::from).toList(),
+                    stream(body.path("pendingHandSelection").path("cards"))
+                            .map(Card::from)
+                            .toList(),
                     body.path("myScore").asInt(),
                     stream(body.path("activeEvents")).map(ActiveEvent::from).toList(),
                     stream(body.path("players")).map(PlayerView::from).toList());

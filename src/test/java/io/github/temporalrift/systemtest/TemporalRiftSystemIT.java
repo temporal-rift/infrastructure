@@ -106,11 +106,12 @@ class TemporalRiftSystemIT {
         var gameId = UUID.fromString(started.body().path("gameId").asText());
         assertThat(gameId).isNotEqualTo(lobbyId);
 
-        // Deal-7-keep-5 (game-service#121/#127): the private state's hand is a pending seven-card offer until
-        // each player selects the five they keep. Round 1 cannot open until every player has selected, so all
-        // three offers are awaited and selected before any player's post-selection state is awaited — awaiting
-        // the post-selection state per player in a single pass would deadlock the first player on a round-open
-        // signal that depends on selections this loop hasn't submitted yet for the other two.
+        // Deal-7-keep-5 (game-service#121/#127, read-service#46): the seven-card deal arrives in
+        // pendingHandSelection, not myHand — myHand stays empty until the player's selection resolves, so the
+        // deal must be read from the pending field. Round 1 cannot open until every player has selected, so
+        // all three offers are awaited and selected before any player's post-selection state is awaited —
+        // awaiting the post-selection state per player in a single pass would deadlock the first player on a
+        // round-open signal that depends on selections this loop hasn't submitted yet for the other two.
         var pendingOffers = new LinkedHashMap<Actor, PlayerState>();
         for (var player : players) {
             pendingOffers.put(
@@ -119,11 +120,12 @@ class TemporalRiftSystemIT {
                             player,
                             gameId,
                             candidate -> candidate.eraNumber() == 1
-                                    && candidate.hand().size() == 7,
+                                    && candidate.pendingHand().size() == 7
+                                    && candidate.hand().isEmpty(),
                             player.name() + " receives the pending seven-card era-one deal"));
         }
         for (var player : players) {
-            var keptCardIds = pendingOffers.get(player).hand().stream()
+            var keptCardIds = pendingOffers.get(player).pendingHand().stream()
                     .map(Card::cardInstanceId)
                     .limit(5)
                     .toList();
