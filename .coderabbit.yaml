@@ -1,0 +1,6 @@
+reviews:
+  auto_review:
+    # Only review pull requests that carry the "review" label -- a deliberate human signal that a
+    # review pass is wanted, rather than reviewing every PR automatically.
+    labels:
+      - "review"
