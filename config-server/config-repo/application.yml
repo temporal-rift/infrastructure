@@ -1,6 +1,6 @@
 # Shared cross-service configuration served to every Config Client application/profile that has no more
-# specific override. Values are the card-grade probability table, copied verbatim from timeline-service's
-# game.rules.probability baseline (TimelineRulesProperties).
+# specific override. Values are copied verbatim from timeline-service's game.rules.probability baseline
+# (TimelineRulesProperties), the more complete of the two per-service copies of each value below.
 game:
   rules:
     probability:
@@ -20,3 +20,8 @@ game:
         I: 1.5
         II: 2.0
         III: 3.0
+      # Also duplicated in game-service as game.rules.scoring.low-max-probability/medium-max-probability
+      # (same 30/60 values, different key names) — served here under timeline-service's names since a
+      # future game-service Config Client adoption reshapes to this canonical shape, not the reverse.
+      band-low-max: 30
+      band-medium-max: 60

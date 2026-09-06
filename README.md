@@ -31,8 +31,11 @@ runs with the Spring Cloud Config Server `native` profile, reading YAML files fr
 which Compose bind-mounts read-only into the container — editing a file there and restarting the container (no
 image rebuild) is enough to serve an updated value, since the native backend re-reads the file on every request.
 
-Today it serves the card-grade probability magnitude/multiplier table under `game.rules.probability.*`, matching the
-shape `timeline-service`'s `TimelineRulesProperties` already expects.
+Today it serves the card-grade probability magnitude/multiplier table and the probability-band thresholds under
+`game.rules.probability.*`, matching the shape `timeline-service`'s `TimelineRulesProperties` already expects. Both
+are hand-duplicated today: the magnitude table is also `game-service`'s flat `game.rules.scoring` baseline, and the
+band thresholds are also `game-service`'s `game.rules.scoring.low-max-probability`/`.medium-max-probability` (same
+30/60 values, different key names).
 
 Query it directly with Config Server's standard `/{application}/{profile}` convention, for example the shared
 defaults everyone gets absent a more specific override:
