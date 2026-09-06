@@ -1,6 +1,14 @@
 services:
   postgres:
     ports: !override []
+    # Default postgres:16-alpine fsyncs and waits for the WAL to hit disk on every commit
+    # (synchronous_commit=on). On a real SSD that's sub-millisecond; on shared/throttled CI
+    # storage it can silently stall for seconds at a time under concurrent write load from three
+    # services' Kafka consumers all committing at once -- with zero error logged, since it's not
+    # a failure, just a slow fsync. This container holds only ephemeral e2e test data with no
+    # durability requirement (torn down every run), so trading crash-safety for speed here is
+    # safe in a way it would not be for any real deployment.
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
 
   kafka:
     ports: !override []
