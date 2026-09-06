@@ -31,11 +31,12 @@ runs with the Spring Cloud Config Server `native` profile, reading YAML files fr
 which Compose bind-mounts read-only into the container — editing a file there and restarting the container (no
 image rebuild) is enough to serve an updated value, since the native backend re-reads the file on every request.
 
-Today it serves the card-grade probability magnitude/multiplier table and the probability-band thresholds under
-`game.rules.probability.*`, matching the shape `timeline-service`'s `TimelineRulesProperties` already expects. Both
-are hand-duplicated today: the magnitude table is also `game-service`'s flat `game.rules.scoring` baseline, and the
-band thresholds are also `game-service`'s `game.rules.scoring.low-max-probability`/`.medium-max-probability` (same
-30/60 values, different key names).
+It serves the card-grade probability magnitude/multiplier table and probability-band thresholds under two
+namespaces at once — `game.rules.probability.*` (the shape `timeline-service`'s `TimelineRulesProperties` expects)
+and `game.rules.scoring.*` (the shape `game-service`'s `ScoringRulesProperties` expects) — the same underlying
+numbers served twice under each service's own pre-existing key names, so neither service had to reshape its
+configuration to adopt this Config Server. Both `game-service` and `timeline-service` now consume it by default,
+with a local profile document or environment variable still able to override any individual value.
 
 Query it directly with Config Server's standard `/{application}/{profile}` convention, for example the shared
 defaults everyone gets absent a more specific override:
@@ -53,14 +54,14 @@ curl http://localhost:8888/application/default
    ```yaml
    spring:
      config:
-       import: "configserver:http://config-server:8888"
+       import: "optional:configserver:${CONFIG_SERVER_URI:http://config-server:8888}"
    ```
+   `optional:` means an unreachable Config Server doesn't itself fail startup — rely on the consuming
+   `@ConfigurationProperties` class's own validation to catch a genuinely incomplete configuration instead.
 3. Bind the served properties the same way any other `@ConfigurationProperties` class does — no custom client code
-   is required. For `game.rules.probability.*`, the shape already matches `timeline-service`'s
-   `TimelineRulesProperties`.
-
-Adopting this Config Server in `game-service` or `timeline-service` — replacing their own hard-coded
-`application.yml` values with this import — is tracked by those services' own issues, not by this repository.
+   is required. If the new service's existing property shape doesn't already match `game.rules.probability.*` or
+   `game.rules.scoring.*`, add a block under the new service's own key names to
+   `config-server/config-repo/application.yml` instead of reshaping the service to match an existing namespace.
 
 ## Centralized logs with VictoriaLogs
 

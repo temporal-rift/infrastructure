@@ -20,8 +20,31 @@ game:
         I: 1.5
         II: 2.0
         III: 3.0
-      # Also duplicated in game-service as game.rules.scoring.low-max-probability/medium-max-probability
-      # (same 30/60 values, different key names) — served here under timeline-service's names since a
-      # future game-service Config Client adoption reshapes to this canonical shape, not the reverse.
       band-low-max: 30
       band-medium-max: 60
+    # game-service's ScoringRulesProperties keeps its own pre-existing flat shape (a Map<CardType,Integer>
+    # covering every card type, not a per-grade map) — its Config Client adoption (game-service#157) reshapes
+    # nothing, so this block intentionally repeats the same PUSH/SUPPRESS/SWING grade-II magnitude and band
+    # threshold values above under game-service's existing key names. Keep both blocks in sync by hand within
+    # this one file — a single-file, single-commit duplication, not the cross-repo one this Config Server exists
+    # to remove.
+    scoring:
+      card-shifts:
+        PUSH: 20
+        SUPPRESS: -20
+        # Non-shifter cards: resolved at timeline resolution time, not during game-service's band preview.
+        AMPLIFY: 0
+        INTERCEPT: 0
+        SCAN: 0
+        TRACE: 0
+        DECOY: 0
+        JAM: 0
+        STALL: 0
+        REDIRECT: 0
+        NULLIFY: 0
+        COLLIDE: 0
+        STABILIZE: 0
+        DETONATE: 0
+      swing-shift: 30
+      low-max-probability: 30
+      medium-max-probability: 60
