@@ -1,6 +1,6 @@
 # Shared cross-service configuration served to every Config Client application/profile that has no more
-# specific override. Values are the GDD §3.2 card-grade table (local-docs/Temporal Rift/temporal-rift-gdd.md),
-# copied verbatim from timeline-service's game.rules.probability baseline (TimelineRulesProperties).
+# specific override. Values are the card-grade probability table, copied verbatim from timeline-service's
+# game.rules.probability baseline (TimelineRulesProperties).
 game:
   rules:
     probability:
