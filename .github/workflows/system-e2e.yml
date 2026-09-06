@@ -158,6 +158,22 @@ jobs:
           key: ${{ runner.os }}-m2-e2e-${{ hashFiles('*/pom.xml', '*/*/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2-e2e-
 
+      # Temporary: sample container CPU/memory throughout the run to diagnose infrastructure#21's
+      # system-e2e timing race (read-service's Kafka consumption lagging ~100s+ behind publication
+      # with no error logged) -- health checks passing says nothing about whether a container is
+      # actually keeping up with its workload under this runner's CPU contention. No name filter:
+      # compose containers don't exist yet when this starts, and `docker stats` with none present
+      # just produces empty samples rather than erroring. Remove once that investigation closes.
+      - name: Start resource monitor
+        run: |
+          (while true; do
+            date -u +"%Y-%m-%dT%H:%M:%S.%3NZ" >> resource-stats.txt
+            docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}" >> resource-stats.txt 2>&1
+            echo "---" >> resource-stats.txt
+            sleep 5
+          done) &
+          echo $! > monitor.pid
+
       - name: Run system E2E
         working-directory: infrastructure
         run: mvn --batch-mode verify -Pe2e
@@ -188,6 +204,15 @@ jobs:
           cp -r target/e2e-diagnostics/. ../e2e-diagnostics/ 2>/dev/null || true
           cp -r target/failsafe-reports ../e2e-diagnostics/failsafe-reports 2>/dev/null || true
           cp -r target/surefire-reports ../e2e-diagnostics/surefire-reports 2>/dev/null || true
+
+      # Temporary, paired with "Start resource monitor" above -- folds into the existing "Upload
+      # diagnostics" step below since it uploads the whole e2e-diagnostics/ directory.
+      - name: Stop resource monitor
+        if: always()
+        run: |
+          [ -f monitor.pid ] && kill "$(cat monitor.pid)" 2>/dev/null || true
+          mkdir -p e2e-diagnostics
+          cp resource-stats.txt e2e-diagnostics/resource-stats.txt 2>/dev/null || true
 
       - name: Upload diagnostics
         if: failure()
