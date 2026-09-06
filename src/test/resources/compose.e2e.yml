@@ -42,7 +42,7 @@ services:
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: DEBUG
       SPRING_APPLICATION_JSON: >-
-        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":3600,"4":3600,"5":3600}}}}
+        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":60,"4":45,"5":30}}}}
     depends_on:
       e2e-auth:
         condition: service_healthy
