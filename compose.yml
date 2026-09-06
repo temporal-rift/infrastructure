@@ -73,6 +73,19 @@ services:
     ports:
       - "9411:9411"
 
+  config-server:
+    build:
+      context: ./config-server
+    volumes:
+      - ./config-server/config-repo:/config:ro
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   victorialogs:
     image: victoriametrics/victoria-logs:v1.52.0
     command:
