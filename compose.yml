@@ -108,6 +108,7 @@ services:
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
       JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://host.docker.internal:9000}
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
       PORT: 8080
     ports:
@@ -121,6 +122,8 @@ services:
         condition: service_healthy
       victorialogs:
         condition: service_started
+      config-server:
+        condition: service_healthy
     logging:
       driver: syslog
       options:
@@ -138,6 +141,7 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
       PORT: 8080
     ports:
@@ -151,6 +155,8 @@ services:
         condition: service_healthy
       victorialogs:
         condition: service_started
+      config-server:
+        condition: service_healthy
     logging:
       driver: syslog
       options:
