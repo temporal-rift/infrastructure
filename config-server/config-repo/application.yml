@@ -1,6 +1,7 @@
 # Shared cross-service configuration served to every Config Client application/profile that has no more
-# specific override. Values are copied verbatim from timeline-service's game.rules.probability baseline
-# (TimelineRulesProperties), the more complete of the two per-service copies of each value below.
+# specific override. game-service and timeline-service both bind this same game.rules.probability namespace
+# directly — each service's own @ConfigurationProperties class only declares the fields it needs, so there is
+# exactly one copy of these values, not one per consuming service.
 game:
   rules:
     probability:
@@ -22,29 +23,3 @@ game:
         III: 3.0
       band-low-max: 30
       band-medium-max: 60
-    # game-service's ScoringRulesProperties keeps its own pre-existing flat shape (a Map<CardType,Integer>
-    # covering every card type, not a per-grade map) — its Config Client adoption (game-service#157) reshapes
-    # nothing, so this block intentionally repeats the same PUSH/SUPPRESS/SWING grade-II magnitude and band
-    # threshold values above under game-service's existing key names. Keep both blocks in sync by hand within
-    # this one file — a single-file, single-commit duplication, not the cross-repo one this Config Server exists
-    # to remove.
-    scoring:
-      card-shifts:
-        PUSH: 20
-        SUPPRESS: -20
-        # Non-shifter cards: resolved at timeline resolution time, not during game-service's band preview.
-        AMPLIFY: 0
-        INTERCEPT: 0
-        SCAN: 0
-        TRACE: 0
-        DECOY: 0
-        JAM: 0
-        STALL: 0
-        REDIRECT: 0
-        NULLIFY: 0
-        COLLIDE: 0
-        STABILIZE: 0
-        DETONATE: 0
-      swing-shift: 30
-      low-max-probability: 30
-      medium-max-probability: 60

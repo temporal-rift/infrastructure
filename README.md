@@ -31,12 +31,14 @@ runs with the Spring Cloud Config Server `native` profile, reading YAML files fr
 which Compose bind-mounts read-only into the container — editing a file there and restarting the container (no
 image rebuild) is enough to serve an updated value, since the native backend re-reads the file on every request.
 
-It serves the card-grade probability magnitude/multiplier table and probability-band thresholds under two
-namespaces at once — `game.rules.probability.*` (the shape `timeline-service`'s `TimelineRulesProperties` expects)
-and `game.rules.scoring.*` (the shape `game-service`'s `ScoringRulesProperties` expects) — the same underlying
-numbers served twice under each service's own pre-existing key names, so neither service had to reshape its
-configuration to adopt this Config Server. Both `game-service` and `timeline-service` now consume it by default,
-with a local profile document or environment variable still able to override any individual value.
+It serves the card-grade probability magnitude table and probability-band thresholds under one namespace,
+`game.rules.probability.*` — `push-shift`, `suppress-shift`, and `swing-shift`, each a map keyed by card grade
+(`I`/`II`/`III`), plus `amplify-multiplier` and the band/floor threshold fields. Both `game-service` and
+`timeline-service` bind this same namespace directly; each service's own `@ConfigurationProperties` class
+declares only the fields it needs (e.g. `game-service` has no use for `amplify-multiplier`, since `AMPLIFY`
+never shifts its band preview) and Spring simply ignores the rest — there is exactly one served copy of these
+values, not one per consuming service. A local profile document or environment variable can still override any
+individual value.
 
 Query it directly with Config Server's standard `/{application}/{profile}` convention, for example the shared
 defaults everyone gets absent a more specific override:
@@ -59,9 +61,11 @@ curl http://localhost:8888/application/default
    `optional:` means an unreachable Config Server doesn't itself fail startup — rely on the consuming
    `@ConfigurationProperties` class's own validation to catch a genuinely incomplete configuration instead.
 3. Bind the served properties the same way any other `@ConfigurationProperties` class does — no custom client code
-   is required. If the new service's existing property shape doesn't already match `game.rules.probability.*` or
-   `game.rules.scoring.*`, add a block under the new service's own key names to
-   `config-server/config-repo/application.yml` instead of reshaping the service to match an existing namespace.
+   is required. Prefer binding directly against an existing namespace like `game.rules.probability.*` (declaring
+   only the fields the new service actually needs) over introducing a parallel namespace for the same
+   underlying values — a second namespace means a second copy to keep in sync by hand, which is exactly what
+   this Config Server exists to avoid. Add a genuinely new block to `config-server/config-repo/application.yml`
+   only when the new service needs values no existing namespace already serves.
 
 ## Centralized logs with VictoriaLogs
 
