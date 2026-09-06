@@ -10,16 +10,55 @@ start the stack with:
 docker compose -f infrastructure/compose.yml up --build
 ```
 
-The stack starts the three services, PostgreSQL (one database per service), Kafka, Kafka UI, Zipkin, and VictoriaLogs.
-It also creates `game.events`, `timeline.events`, `game.commands`, and `game.dlq` with three partitions before the
-services start. Each service waits for a healthy Zipkin server before starting, so its startup spans are retained. Set
-`JWT_ISSUER_URI` to a reachable issuer before using authenticated game-service or read-service endpoints.
+The stack starts the three services, PostgreSQL (one database per service), Kafka, Kafka UI, Zipkin, VictoriaLogs, and
+a Config Server. It also creates `game.events`, `timeline.events`, `game.commands`, and `game.dlq` with three
+partitions before the services start. Each service waits for a healthy Zipkin server before starting, so its startup
+spans are retained. Set `JWT_ISSUER_URI` to a reachable issuer before using authenticated game-service or read-service
+endpoints.
 
 | Local UI | URL |
 |---|---|
 | VictoriaLogs centralized logs | http://localhost:9428/select/vmui |
 | Zipkin distributed traces | http://localhost:9411/zipkin/ |
 | Kafka UI | http://localhost:8083 |
+| Config Server | http://localhost:8888 |
+
+## Shared configuration with Spring Cloud Config Server
+
+`config-server` is a small Spring Boot app (`config-server/`, built from this repo) serving configuration values
+that are meant to be shared across independently-deployed services, rather than hand-duplicated in each one. It
+runs with the Spring Cloud Config Server `native` profile, reading YAML files from `config-server/config-repo/`,
+which Compose bind-mounts read-only into the container — editing a file there and restarting the container (no
+image rebuild) is enough to serve an updated value, since the native backend re-reads the file on every request.
+
+Today it serves the GDD §3.2 card-grade probability magnitude/multiplier table
+(`local-docs/Temporal Rift/temporal-rift-gdd.md`) under `game.rules.probability.*`, matching the shape
+`timeline-service`'s `TimelineRulesProperties` already expects.
+
+Query it directly with Config Server's standard `/{application}/{profile}` convention, for example the shared
+defaults everyone gets absent a more specific override:
+
+```bash
+curl http://localhost:8888/application/default
+```
+
+### Onboarding a new service as a Config Client
+
+1. Add `org.springframework.cloud:spring-cloud-config-server`'s client counterpart,
+   `org.springframework.cloud:spring-cloud-starter-config`, as a dependency (version managed by
+   `temporal-rift-bom`'s `spring-cloud-dependencies` import).
+2. Point the service at this Config Server, e.g. in `application.yml`:
+   ```yaml
+   spring:
+     config:
+       import: "configserver:http://config-server:8888"
+   ```
+3. Bind the served properties the same way any other `@ConfigurationProperties` class does — no custom client code
+   is required. For `game.rules.probability.*`, the shape already matches `timeline-service`'s
+   `TimelineRulesProperties`.
+
+Adopting this Config Server in `game-service` or `timeline-service` — replacing their own hard-coded
+`application.yml` values with this import — is tracked by those services' own issues, not by this repository.
 
 ## Centralized logs with VictoriaLogs
 
