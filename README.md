@@ -204,6 +204,9 @@ assertThat(round.pendingPlayerIds()).containsExactlyInAnyOrder(playerTwo.playerI
 | Security and privacy | Missing token → 401; non-host start → 403; outsider state read → 404; own faction/hand visible; peer factions hidden |
 | Lobby lifecycle | Create; join; duplicate join rejection; insufficient-player rejection; host transfer; last-host closure |
 | Game and era start | Accepted start; distinct game/lobby IDs; seven-card deal, five-card hand selection, faction and three-event read projections |
+| Action rounds | Dynamic, round-eligible card and faction-special selection; duplicate-submission and forged-event-target rejection; once-per-era special budget accepted once, rejected on same-era reuse, and accepted again next era; both round-close paths (all-submitted and timer) |
+| Timeline and scoring | Action-round resolution; `game-service` and `read-service` scores agree after era completion |
+| Era continuation | Era two projects three active events and a fresh five-card hand (not accumulated from era one), with a durable history record; cascaded events may legitimately carry over |
 | Centralized logs | All three services' `app_name` visible in VictoriaLogs; at least one event has non-blank `traceId` and `spanId` |
 
 The system test intentionally complements, rather than duplicates, exhaustive aggregate and adapter tests in each
@@ -221,14 +224,3 @@ These documented surfaces do not yet have a complete production path and are not
 
 Their existing service-local tests remain authoritative for implemented internal slices until the missing public or
 cross-service path is delivered.
-
-### Excluded pending the card-system rework
-
-The three-round card-play lifecycle — action rounds, forged-target and duplicate-submission rejection, faction
-specials, round-close paths, timeline resolution, scoring parity, and era-two continuation — is deliberately not
-simulated here. It selects valid cards and an eligible faction special, both of which the in-flight card-system rework
-(game-service#121, #122, #123; timeline-service#45 — grades, playability restrictions, and the once-per-era special
-budget) changes what a scenario may legally play. Writing it now would mean rewriting it once that rework lands, so it
-is tracked separately in
-[temporal-rift/infrastructure#7](https://github.com/temporal-rift/infrastructure/issues/7) and lands against the
-reworked rules instead.

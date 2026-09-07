@@ -38,7 +38,10 @@ final class TemporalRiftScenario {
         return eventually(
                 () -> {
                     var response = as(actor).getPlayerState(gameId);
-                    return response.status() == 200 ? Optional.of(PlayerState.from(response.body())) : Optional.empty();
+                    if (response.status() != 200) {
+                        return Optional.<PlayerState>empty();
+                    }
+                    return Optional.of(PlayerState.from(response.body()));
                 },
                 expected,
                 description);
@@ -145,6 +148,15 @@ final class TemporalRiftScenario {
             return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
         }
 
+        JsonHttpClient.Response playCardTargetingPlayer(
+                UUID gameId, int eraNumber, int roundNumber, Card card, UUID targetPlayerId) {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("actionType", "CARD");
+            body.put("cardInstanceId", card.cardInstanceId());
+            body.put("targetPlayerId", targetPlayerId);
+            return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
+        }
+
         JsonHttpClient.Response selectHand(UUID gameId, int eraNumber, List<UUID> keptCardInstanceIds) {
             var body = new LinkedHashMap<String, Object>();
             body.put("keptCardInstanceIds", keptCardInstanceIds);
@@ -163,6 +175,15 @@ final class TemporalRiftScenario {
             body.put("specialAction", specialAction);
             body.put("targetEventId", targetEventId);
             body.put("targetOutcomeId", targetOutcomeId);
+            return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
+        }
+
+        JsonHttpClient.Response playSpecialTargetingPlayer(
+                UUID gameId, int eraNumber, int roundNumber, String specialAction, UUID targetPlayerId) {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("actionType", "SPECIAL");
+            body.put("specialAction", specialAction);
+            body.put("targetPlayerId", targetPlayerId);
             return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
         }
     }
@@ -197,10 +218,14 @@ final class TemporalRiftScenario {
         }
     }
 
-    record Card(UUID cardInstanceId, String cardType) {
+    record Card(UUID cardInstanceId, String cardType, String grade, boolean isPlayableThisRound) {
 
         static Card from(JsonNode body) {
-            return new Card(uuid(body, "cardInstanceId"), body.path("cardType").asText());
+            return new Card(
+                    uuid(body, "cardInstanceId"),
+                    body.path("cardType").asText(),
+                    nullableText(body.get("grade")),
+                    body.path("isPlayableThisRound").asBoolean(true));
         }
     }
 
