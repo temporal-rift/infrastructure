@@ -41,8 +41,11 @@ services:
       JWT_ISSUER_URI: http://e2e-auth
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: DEBUG
+      # max-eras: 2 keeps the game-ended lifecycle scenario within the e2e time budget -- it needs the
+      # game to reach a terminal state (win, collapse, or stabilization), not to actually play out all
+      # five production eras of real card combat.
       SPRING_APPLICATION_JSON: >-
-        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":60,"4":45,"5":30},"hand-deal-forced-types":["TRACE","NULLIFY"]}}}
+        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":60,"4":45,"5":30},"hand-deal-forced-types":["TRACE","NULLIFY"],"max-eras":2}}}
     depends_on:
       e2e-auth:
         condition: service_healthy
@@ -65,6 +68,14 @@ services:
 
   timeline-service:
     ports: !override []
+    environment:
+      # Paradoxes are opportunistic in the game-ended lifecycle scenario (it doesn't force or avoid them),
+      # and an unresolved paradox force-cascades only after this timer expires. Up to three events can each
+      # open their own resolution phase in reveal order (sagas.md), so the 60s production default could
+      # serialize past this scenario's per-transition await budget; shortening it here matches game-service's
+      # own e2e-only round/hand-selection timer overrides.
+      SPRING_APPLICATION_JSON: >-
+        {"game":{"rules":{"paradox-resolution-timer-seconds":5}}}
     logging:
       options:
         syslog-address: tcp://127.0.0.1:22201

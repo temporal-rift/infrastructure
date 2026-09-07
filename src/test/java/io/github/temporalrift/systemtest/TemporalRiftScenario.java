@@ -59,13 +59,17 @@ final class TemporalRiftScenario {
     }
 
     ScoreBoard awaitScores(Actor actor, UUID gameId, Predicate<ScoreBoard> expected) {
+        return awaitScores(actor, gameId, expected, "score publication");
+    }
+
+    ScoreBoard awaitScores(Actor actor, UUID gameId, Predicate<ScoreBoard> expected, String description) {
         return eventually(
                 () -> {
                     var response = as(actor).getScores(gameId);
                     return response.status() == 200 ? Optional.of(ScoreBoard.from(response.body())) : Optional.empty();
                 },
                 expected,
-                "score publication");
+                description);
     }
 
     GameHistory awaitGameHistory(Actor actor, UUID gameId, Predicate<GameHistory> expected, String description) {
@@ -281,14 +285,26 @@ final class TemporalRiftScenario {
         }
     }
 
-    record ScoreBoard(int eraNumber, Map<UUID, Integer> scores) {
+    // `faction` is null on every entry until FactionRevealed fires at game end (api-contract.md §3).
+    record ScoreBoard(int eraNumber, List<PlayerScoreEntry> scores) {
 
         static ScoreBoard from(JsonNode body) {
-            var scores = new LinkedHashMap<UUID, Integer>();
-            stream(body.path("scores"))
-                    .forEach(score -> scores.put(
-                            uuid(score, "playerId"), score.path("score").asInt()));
-            return new ScoreBoard(body.path("eraNumber").asInt(), Map.copyOf(scores));
+            return new ScoreBoard(
+                    body.path("eraNumber").asInt(),
+                    stream(body.path("scores")).map(PlayerScoreEntry::from).toList());
+        }
+
+        Optional<PlayerScoreEntry> forPlayer(UUID playerId) {
+            return scores.stream()
+                    .filter(entry -> entry.playerId().equals(playerId))
+                    .findFirst();
+        }
+    }
+
+    record PlayerScoreEntry(UUID playerId, int score, String faction) {
+        static PlayerScoreEntry from(JsonNode body) {
+            return new PlayerScoreEntry(
+                    uuid(body, "playerId"), body.path("score").asInt(), nullableText(body.get("faction")));
         }
     }
 
@@ -305,12 +321,39 @@ final class TemporalRiftScenario {
         }
     }
 
-    record EraHistory(int eraNumber, List<DealtCard> myHand) {
+    // `cascadedEvents` is omitted by the API entirely when `paradoxesCascaded` is zero (projection.yml),
+    // so reading it via the missing-node-safe `stream(...)` helper -- rather than requiring the field --
+    // is what makes this record usable for both cascaded and non-cascaded eras.
+    record EraHistory(
+            int eraNumber,
+            List<DealtCard> myHand,
+            List<ResolvedOutcome> outcomes,
+            int paradoxesCascaded,
+            List<CascadedEvent> cascadedEvents) {
 
         static EraHistory from(JsonNode body) {
             return new EraHistory(
                     body.path("eraNumber").asInt(),
-                    stream(body.path("myHand")).map(DealtCard::from).toList());
+                    stream(body.path("myHand")).map(DealtCard::from).toList(),
+                    stream(body.path("outcomes")).map(ResolvedOutcome::from).toList(),
+                    body.path("paradoxesCascaded").asInt(),
+                    stream(body.path("cascadedEvents")).map(CascadedEvent::from).toList());
+        }
+    }
+
+    record ResolvedOutcome(UUID eventId, String title, UUID winningOutcomeId, String winningOutcomeDescription) {
+        static ResolvedOutcome from(JsonNode body) {
+            return new ResolvedOutcome(
+                    uuid(body, "eventId"),
+                    body.path("title").asText(),
+                    uuid(body, "winningOutcomeId"),
+                    body.path("winningOutcomeDescription").asText());
+        }
+    }
+
+    record CascadedEvent(UUID eventId, String title) {
+        static CascadedEvent from(JsonNode body) {
+            return new CascadedEvent(uuid(body, "eventId"), body.path("title").asText());
         }
     }
 
