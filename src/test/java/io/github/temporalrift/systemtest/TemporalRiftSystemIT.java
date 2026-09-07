@@ -102,7 +102,7 @@ class TemporalRiftSystemIT {
         var gameId = startGameWithThreePlayers(host, playerTwo, playerThree);
         dealAndSelectEraOneHands(gameId, players);
 
-        var unused = awaitEraOneStatesAndRejectOutsider(gameId, players, outsider);
+        awaitEraOneStatesAndRejectOutsider(gameId, players, outsider);
     }
 
     @Test
