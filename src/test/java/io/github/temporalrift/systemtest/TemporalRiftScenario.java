@@ -210,7 +210,7 @@ final class TemporalRiftScenario {
                     nullableText(body.get("myFaction")),
                     stream(body.path("myHand")).map(Card::from).toList(),
                     stream(body.path("pendingHandSelection").path("cards"))
-                            .map(Card::from)
+                            .map(Card::fromDealt)
                             .toList(),
                     body.path("myScore").asInt(),
                     stream(body.path("activeEvents")).map(ActiveEvent::from).toList(),
@@ -220,12 +220,24 @@ final class TemporalRiftScenario {
 
     record Card(UUID cardInstanceId, String cardType, String grade, boolean isPlayableThisRound) {
 
+        // `HandCard` (myHand): isPlayableThisRound is a required field per projection.yml.
         static Card from(JsonNode body) {
             return new Card(
                     uuid(body, "cardInstanceId"),
                     body.path("cardType").asText(),
                     nullableText(body.get("grade")),
-                    body.path("isPlayableThisRound").asBoolean(true));
+                    requiredBoolean(body, "isPlayableThisRound"));
+        }
+
+        // `DealtHandCard` (pendingHandSelection.cards): a distinct wire shape with no isPlayableThisRound
+        // field at all (round eligibility isn't meaningful before a hand is even selected) — carries
+        // `dealSlot` instead. False here is an inert placeholder never read for pending cards.
+        static Card fromDealt(JsonNode body) {
+            return new Card(
+                    uuid(body, "cardInstanceId"),
+                    body.path("cardType").asText(),
+                    nullableText(body.get("grade")),
+                    false);
         }
     }
 
@@ -328,6 +340,14 @@ final class TemporalRiftScenario {
 
     private static String nullableText(JsonNode node) {
         return node == null || node.isNull() || node.isMissingNode() ? null : node.asText();
+    }
+
+    private static boolean requiredBoolean(JsonNode node, String field) {
+        var value = node.path(field);
+        if (value.isMissingNode()) {
+            throw new AssertionError("Missing required field: " + field);
+        }
+        return value.asBoolean();
     }
 
     private static Stream<JsonNode> stream(JsonNode array) {
