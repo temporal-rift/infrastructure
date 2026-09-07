@@ -39,8 +39,13 @@ class TemporalRiftSystemIT {
     private static final Set<String> TWO_OUTCOME_CARD_TYPES = Set.of("SWING", "COLLIDE");
     private static final Set<String> ROUND_ONE_INELIGIBLE_TYPES = Set.of("TRACE");
     private static final Set<String> ROUND_THREE_INELIGIBLE_TYPES = Set.of("JAM", "SCAN", "INTERCEPT");
-    // Only Weavers and Activists own no once-per-era-budgeted special — with three distinct factions drawn
-    // from five for a three-player game, at least one player is always assigned one of these three factions.
+    // `mySpecialActions` (which would give this per-player, live, without a faction lookup) is not yet
+    // implemented in read-service — its own ProjectionRestMapper explicitly leaves it unset ("deferred to a
+    // later slice"), and projection.yml documents the same. Until it's real, faction-to-special ownership has
+    // no live equivalent to read instead, so it stays a hardcoded fact here, unlike round-eligibility (which
+    // isPlayableThisRound already exposes live per-card). Only Weavers and Activists own no once-per-era-
+    // budgeted special — with three distinct factions drawn from five for a three-player game, at least one
+    // player is always assigned one of these three factions.
     private static final Map<String, String> BUDGETED_SPECIAL_BY_FACTION =
             Map.of("ERASERS", "ANNIHILATE", "PROPHETS", "SEAL", "REVISIONISTS", "MIMIC");
 
@@ -125,7 +130,7 @@ class TemporalRiftSystemIT {
         playEraOneRoundTwo(gameId, host, players, budgetedPlayer, budgetedSpecial);
         playEraOneRoundThree(gameId, host, players);
 
-        verifyScoresAndLaterEraProjection(gameId, host, players);
+        verifyScoresAndLaterEraProjection(gameId, host, players, eraOneStates);
         verifySpecialBudgetResetsInEraTwo(gameId, budgetedPlayer, budgetedSpecial);
     }
 
@@ -272,9 +277,8 @@ class TemporalRiftSystemIT {
     }
 
     private void probeRoundIneligibilityIfAvailable(Actor player, UUID gameId, int roundNumber, PlayerState state) {
-        ineligibleTypesForRound(roundNumber).stream()
-                .flatMap(ineligibleType ->
-                        state.hand().stream().filter(card -> card.cardType().equals(ineligibleType)))
+        state.hand().stream()
+                .filter(card -> !card.isPlayableThisRound())
                 .findFirst()
                 .ifPresent(ineligibleCard -> {
                     var targetEvent = state.activeEvents().getFirst();
@@ -335,14 +339,6 @@ class TemporalRiftSystemIT {
         return ROUND_ONE_INELIGIBLE_TYPES.contains(cardType) || ROUND_THREE_INELIGIBLE_TYPES.contains(cardType);
     }
 
-    private static Set<String> ineligibleTypesForRound(int roundNumber) {
-        return switch (roundNumber) {
-            case 1 -> ROUND_ONE_INELIGIBLE_TYPES;
-            case 3 -> ROUND_THREE_INELIGIBLE_TYPES;
-            default -> Set.of();
-        };
-    }
-
     private static UUID targetOutcome(ActiveEvent event) {
         return event.outcomeIds().getFirst();
     }
@@ -370,7 +366,8 @@ class TemporalRiftSystemIT {
                         "CLOSED".equals(candidate.status()) && candidate.submittedCount() == expectedSubmittedCount);
     }
 
-    private void verifyScoresAndLaterEraProjection(UUID gameId, Actor host, List<Actor> players) {
+    private void verifyScoresAndLaterEraProjection(
+            UUID gameId, Actor host, List<Actor> players, Map<Actor, PlayerState> eraOneStates) {
         var scores = scenario.awaitScores(
                 host, gameId, board -> board.eraNumber() == 1 && board.scores().size() == players.size());
 
@@ -382,6 +379,15 @@ class TemporalRiftSystemIT {
                     player.name() + " reaches a later era with a fresh hand");
             assertThat(laterState.myScore()).isEqualTo(scores.scores().get(player.playerId()));
             assertThat(laterState.activeEvents()).hasSize(3);
+
+            var eraOneCardIds = eraOneStates.get(player).hand().stream()
+                    .map(Card::cardInstanceId)
+                    .collect(Collectors.toSet());
+            var laterCardIds =
+                    laterState.hand().stream().map(Card::cardInstanceId).collect(Collectors.toSet());
+            assertThat(laterCardIds)
+                    .as("%s's later-era hand reuses none of era one's card instances", player.name())
+                    .doesNotContainAnyElementsOf(eraOneCardIds);
 
             var history = scenario.awaitGameHistory(
                     player,

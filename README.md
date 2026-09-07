@@ -218,7 +218,7 @@ These documented surfaces do not yet have a complete production path and are not
 
 - paradox-resolution action REST and paradox-resolution saga interaction
 - timeline-service Scan probability-state and Weaver-chain REST endpoints
-- read-service history endpoint and WebSocket notification/filtering
+- read-service WebSocket notification/filtering
 - disconnect/reconnect initiation from the absent WebSocket notification path
 - paradox cascade, chain, timeline collapse, timeline stabilization, and final faction reveal as complete player journeys
 
