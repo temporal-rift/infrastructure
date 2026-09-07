@@ -207,6 +207,7 @@ assertThat(round.pendingPlayerIds()).containsExactlyInAnyOrder(playerTwo.playerI
 | Action rounds | Dynamic, round-eligible card and faction-special selection; duplicate-submission and forged-event-target rejection; once-per-era special budget accepted once, rejected on same-era reuse, and accepted again next era; both round-close paths (all-submitted and timer) |
 | Timeline and scoring | Action-round resolution; `game-service` and `read-service` scores agree after era completion |
 | Era continuation | Era two projects three active events and a fresh five-card hand (not accumulated from era one), with a durable history record; cascaded events may legitimately carry over |
+| Game end and faction reveal | Game reaches a terminal state (win, collapse, or stabilization) via public entry points only; `game-service` and `read-service` final scores and revealed factions agree; every player's faction is null until `FactionRevealed` and populated for all players afterward; game history is durable through the final era |
 | Centralized logs | All three services' `app_name` visible in VictoriaLogs; at least one event has non-blank `traceId` and `spanId` |
 
 The system test intentionally complements, rather than duplicates, exhaustive aggregate and adapter tests in each
@@ -220,7 +221,8 @@ These documented surfaces do not yet have a complete production path and are not
 - timeline-service Scan probability-state and Weaver-chain REST endpoints
 - read-service WebSocket notification/filtering
 - disconnect/reconnect initiation from the absent WebSocket notification path
-- paradox cascade, chain, timeline collapse, timeline stabilization, and final faction reveal as complete player journeys
+- paradox cascade and Weaver-chain accumulation as complete player journeys (the game-end scenario lets paradoxes
+  cascade opportunistically but does not force a chain or a specific collapse/stabilization outcome)
 
 Their existing service-local tests remain authoritative for implemented internal slices until the missing public or
 cross-service path is delivered.

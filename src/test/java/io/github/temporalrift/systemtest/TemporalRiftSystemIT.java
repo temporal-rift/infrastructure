@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,9 @@ import org.junit.jupiter.api.Test;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.ActiveEvent;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.Card;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.PlayerState;
+import io.github.temporalrift.systemtest.TemporalRiftScenario.PlayerView;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.RoundState;
+import io.github.temporalrift.systemtest.TemporalRiftScenario.ScoreBoard;
 
 class TemporalRiftSystemIT {
 
@@ -48,6 +51,10 @@ class TemporalRiftSystemIT {
     // player is always assigned one of these three factions.
     private static final Map<String, String> BUDGETED_SPECIAL_BY_FACTION =
             Map.of("ERASERS", "ANNIHILATE", "PROPHETS", "SEAL", "REVISIONISTS", "MIMIC");
+
+    // Matches compose.e2e.yml's game.rules.max-eras override: enough eras to reach a terminal state
+    // (win, collapse, or stabilization) without playing out all five production eras of real combat.
+    private static final int E2E_MAX_ERAS = 2;
 
     private final TemporalRiftScenario scenario = new TemporalRiftScenario();
     private final JsonHttpClient httpClient = new JsonHttpClient();
@@ -164,6 +171,174 @@ class TemporalRiftSystemIT {
 
         verifyScoresAndLaterEraProjection(gameId, host, players, eraOneStates);
         verifySpecialBudgetResetsInEraTwo(gameId, budgetedPlayer, budgetedSpecial);
+    }
+
+    @Test
+    void gameReachesGameEndedWithAgreeingFinalScoresAndRevealedFactions() {
+        var host = Actor.named("Host");
+        var playerTwo = Actor.named("Player two");
+        var playerThree = Actor.named("Player three");
+        var players = List.of(host, playerTwo, playerThree);
+
+        var gameId = startGameWithThreePlayers(host, playerTwo, playerThree);
+        dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseAlwaysPlayableHand);
+
+        var preRevealState = awaitPlayerAtEraRound(host, gameId, 1, 1);
+        assertThat(preRevealState.players())
+                .as("factions stay hidden before FactionRevealed")
+                .allSatisfy(view -> assertThat(view.faction()).isNull());
+
+        var finalStates = playUntilGameEnded(gameId, players);
+
+        for (var player : players) {
+            assertThat(finalStates.get(player).players())
+                    .as("%s sees every player's revealed faction", player.name())
+                    .allSatisfy(view -> assertThat(view.faction()).isNotBlank());
+        }
+
+        verifyFinalScoresAgreeAcrossServices(gameId, host, players, finalStates);
+
+        var finalEraNumber = finalStates.get(host).eraNumber();
+        var history = scenario.awaitGameHistory(
+                host,
+                gameId,
+                candidate -> candidate.era(finalEraNumber).isPresent(),
+                "game history is durable through the final era");
+        for (var eraNumber = 1; eraNumber <= finalEraNumber; eraNumber++) {
+            var finalEraNumberCopy = eraNumber;
+            var era = history.era(eraNumber)
+                    .orElseThrow(() -> new AssertionError("Missing history entry for era " + finalEraNumberCopy));
+            assertThat(era.outcomes().size() + era.cascadedEvents().size())
+                    .as("era %d history reflects resolved or cascaded outcomes", eraNumber)
+                    .isGreaterThan(0);
+        }
+    }
+
+    // Bounded by E2E_MAX_ERAS rather than looping forever: with game.rules.max-eras overridden to that
+    // value (compose.e2e.yml), the game is guaranteed to reach GAME_ENDED (via win, collapse, or
+    // stabilization) at or before that era's resolution, so exceeding it is a genuine defect worth failing
+    // loudly on rather than silently retrying past this scenario's time budget.
+    private Map<Actor, PlayerState> playUntilGameEnded(UUID gameId, List<Actor> players) {
+        for (var eraNumber = 1; eraNumber <= E2E_MAX_ERAS; eraNumber++) {
+            playEraToCompletion(gameId, players, eraNumber);
+
+            var currentEra = eraNumber;
+            var afterEra = players.stream()
+                    .collect(Collectors.toMap(
+                            player -> player, player -> awaitEraAdvancedOrGameEnded(player, gameId, currentEra)));
+            if ("GAME_ENDED".equals(afterEra.get(players.getFirst()).phase())) {
+                return afterEra;
+            }
+
+            for (var player : players) {
+                var keptCardIds = chooseAlwaysPlayableHand(afterEra.get(player).pendingHand());
+                scenario.as(player)
+                        .selectHand(gameId, currentEra + 1, keptCardIds)
+                        .assertStatus(202);
+            }
+        }
+        throw new AssertionError("Game did not reach GAME_ENDED within " + E2E_MAX_ERAS + " configured eras");
+    }
+
+    // The game can end mid-era-loop (a score-threshold win or a timeline collapse) instead of only ever
+    // advancing to the next era's deal (a timeline stabilization at the max-eras boundary) -- awaiting
+    // either as one predicate is what makes this scenario robust to whichever terminal condition the
+    // random card play actually triggers, rather than assuming era-by-era advancement is the only path.
+    //
+    // Unlike era one's deal (checked with hand().isEmpty() in dealAndSelectHand, since there's no prior
+    // era's hand to linger), HandDealt only fills pendingHandSelection -- it never touches myHand, so a
+    // later era's myHand still holds the previous era's five selected cards until this era's own
+    // HandSelected resolves it. Requiring hand().isEmpty() here would wait forever for a state that never
+    // occurs past era one.
+    private PlayerState awaitEraAdvancedOrGameEnded(Actor player, UUID gameId, int currentEraNumber) {
+        return scenario.awaitPlayerState(
+                player,
+                gameId,
+                candidate -> "GAME_ENDED".equals(candidate.phase())
+                        || (candidate.eraNumber() == currentEraNumber + 1
+                                && candidate.pendingHand().size() == 7),
+                player.name() + " reaches GAME_ENDED or the era-" + (currentEraNumber + 1) + " deal");
+    }
+
+    private void playEraToCompletion(UUID gameId, List<Actor> players, int eraNumber) {
+        for (var roundNumber = 1; roundNumber <= 3; roundNumber++) {
+            var round = roundNumber;
+            var states = players.stream()
+                    .collect(Collectors.toMap(
+                            player -> player, player -> awaitPlayerAtEraRound(player, gameId, eraNumber, round)));
+            for (var player : players) {
+                playAnyEligibleAction(player, players, gameId, eraNumber, round, states.get(player));
+            }
+        }
+    }
+
+    // A lightweight, always-non-probing submission: issue #7's scenario already proves duplicate/forged/
+    // round-ineligible rejection and the once-per-era special budget, so this only needs to advance every
+    // round with a valid action wherever one is available -- a player with nothing eligible is simply
+    // skipped, letting the round's own timer close it, exactly as production allows.
+    private void playAnyEligibleAction(
+            Actor player, List<Actor> allPlayers, UUID gameId, int eraNumber, int roundNumber, PlayerState state) {
+        var eligible = state.hand().stream().filter(Card::isPlayableThisRound).toList();
+        if (eligible.isEmpty()) {
+            return;
+        }
+
+        var card = eligible.getFirst();
+        if (PLAYER_TARGETING_CARD_TYPES.contains(card.cardType())) {
+            var opponent = allPlayers.stream()
+                    .filter(candidate -> !candidate.equals(player))
+                    .findFirst()
+                    .orElseThrow();
+            scenario.as(player)
+                    .playCardTargetingPlayer(gameId, eraNumber, roundNumber, card, opponent.playerId())
+                    .assertStatus(202);
+            return;
+        }
+
+        var event = state.activeEvents().getFirst();
+        var sourceOutcomeId = TWO_OUTCOME_CARD_TYPES.contains(card.cardType()) ? sourceOutcome(event) : null;
+        scenario.as(player)
+                .playCard(gameId, eraNumber, roundNumber, card, event.eventId(), sourceOutcomeId, targetOutcome(event))
+                .assertStatus(202);
+    }
+
+    private void verifyFinalScoresAgreeAcrossServices(
+            UUID gameId, Actor host, List<Actor> players, Map<Actor, PlayerState> finalStates) {
+        // FactionRevealed's unidentified-faction bonus is awarded reactively in game-service after
+        // GameEnded already published its score snapshot (temporal-rift-gdd.md §7), so game-service's own
+        // /scores can briefly lag read-service's projection. Polling for convergence rather than comparing
+        // two independent one-shot reads is what makes this assertion race-free instead of flaky.
+        var finalScores = scenario.awaitScores(
+                host,
+                gameId,
+                board -> players.stream().allMatch(player -> scoresAgree(board, player, finalStates.get(player))),
+                "game-service scores converge with read-service's final per-player scores and revealed factions");
+
+        for (var player : players) {
+            var expected = finalStates.get(player);
+            var actual = finalScores.forPlayer(player.playerId()).orElseThrow();
+            assertThat(actual.score())
+                    .as("%s's final score agrees between game-service and read-service", player.name())
+                    .isEqualTo(expected.myScore());
+            assertThat(actual.faction())
+                    .as("%s's revealed faction agrees between game-service and read-service", player.name())
+                    .isEqualTo(readSideFaction(expected, player));
+        }
+    }
+
+    private static boolean scoresAgree(ScoreBoard board, Actor player, PlayerState readState) {
+        return board.forPlayer(player.playerId())
+                .filter(entry -> entry.score() == readState.myScore())
+                .filter(entry -> entry.faction() != null && entry.faction().equals(readSideFaction(readState, player)))
+                .isPresent();
+    }
+
+    private static String readSideFaction(PlayerState state, Actor player) {
+        return state.players().stream()
+                .filter(view -> view.playerId().equals(player.playerId()))
+                .findFirst()
+                .map(PlayerView::faction)
+                .orElseThrow();
     }
 
     private void playEraOneRoundOne(
@@ -417,11 +592,16 @@ class TemporalRiftSystemIT {
     }
 
     private PlayerState awaitPlayerAtRound(Actor player, UUID gameId, int roundNumber) {
+        return awaitPlayerAtEraRound(player, gameId, 1, roundNumber);
+    }
+
+    private PlayerState awaitPlayerAtEraRound(Actor player, UUID gameId, int eraNumber, int roundNumber) {
         return scenario.awaitPlayerState(
                 player,
                 gameId,
-                candidate -> candidate.eraNumber() == 1 && ("ACTION_ROUND_" + roundNumber).equals(candidate.phase()),
-                player.name() + " reaches round " + roundNumber);
+                candidate ->
+                        candidate.eraNumber() == eraNumber && ("ACTION_ROUND_" + roundNumber).equals(candidate.phase()),
+                player.name() + " reaches era " + eraNumber + " round " + roundNumber);
     }
 
     private void awaitRoundClosed(
@@ -446,7 +626,8 @@ class TemporalRiftSystemIT {
                     gameId,
                     candidate -> candidate.eraNumber() >= 2 && candidate.hand().size() == 5,
                     player.name() + " reaches a later era with a fresh hand");
-            assertThat(laterState.myScore()).isEqualTo(scores.scores().get(player.playerId()));
+            assertThat(laterState.myScore())
+                    .isEqualTo(scores.forPlayer(player.playerId()).orElseThrow().score());
             assertThat(laterState.activeEvents()).hasSize(3);
 
             var eraOneCardIds = eraOneStates.get(player).hand().stream()
@@ -507,12 +688,18 @@ class TemporalRiftSystemIT {
 
     // `hand` is the confirmed playable hand and `pendingHand` the unresolved seven-card deal — they are
     // separate fields in the contract, not two states of one field. HandDealt fills only
-    // pendingHandSelection; myHand stays empty until HandSelected resolves the choice.
+    // pendingHandSelection and never touches myHand, so myHand keeps showing the previous era's five
+    // selected cards (empty only for era one, which has none) until this era's own HandSelected resolves it.
     private void dealAndSelectEraOneHands(UUID gameId, List<Actor> players) {
-        // Round 1 cannot open until every player has selected, so all three offers are awaited and selected
+        dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseEraOneHand);
+    }
+
+    private void dealAndSelectHand(
+            UUID gameId, List<Actor> players, int eraNumber, Function<List<Card>, List<UUID>> handChooser) {
+        // Round 1 cannot open until every player has selected, so all offers are awaited and selected
         // before any player's post-selection state is awaited — awaiting the post-selection state per player
         // in a single pass would deadlock the first player on a round-open signal that depends on selections
-        // this loop hasn't submitted yet for the other two.
+        // this loop hasn't submitted yet for the others.
         var pendingOffers = new LinkedHashMap<Actor, PlayerState>();
         for (var player : players) {
             pendingOffers.put(
@@ -520,15 +707,30 @@ class TemporalRiftSystemIT {
                     scenario.awaitPlayerState(
                             player,
                             gameId,
-                            candidate -> candidate.eraNumber() == 1
-                                    && candidate.pendingHand().size() == 7
-                                    && candidate.hand().isEmpty(),
-                            player.name() + " receives the pending seven-card era-one deal"));
+                            candidate -> candidate.eraNumber() == eraNumber
+                                    && candidate.pendingHand().size() == 7,
+                            player.name() + " receives the pending seven-card era-" + eraNumber + " deal"));
         }
         for (var player : players) {
-            var keptCardIds = chooseEraOneHand(pendingOffers.get(player).pendingHand());
-            scenario.as(player).selectHand(gameId, 1, keptCardIds).assertStatus(202);
+            var keptCardIds = handChooser.apply(pendingOffers.get(player).pendingHand());
+            scenario.as(player).selectHand(gameId, eraNumber, keptCardIds).assertStatus(202);
         }
+    }
+
+    // Unlike chooseEraOneHand (which deliberately keeps round-restricted cards to probe rejection —
+    // already proven by #7's scenario), this keeps only cards playable in every round so the game-end
+    // scenario's per-round submission doesn't stall on timers waiting for a player with nothing eligible.
+    private static List<UUID> chooseAlwaysPlayableHand(List<Card> offer) {
+        var kept = new ArrayList<Card>();
+        offer.stream()
+                .filter(card -> !isRoundRestrictedType(card.cardType()))
+                .limit(5)
+                .forEach(kept::add);
+        offer.stream()
+                .filter(card -> !kept.contains(card))
+                .limit(5 - kept.size())
+                .forEach(kept::add);
+        return kept.stream().map(Card::cardInstanceId).toList();
     }
 
     private static List<UUID> chooseEraOneHand(List<Card> offer) {
