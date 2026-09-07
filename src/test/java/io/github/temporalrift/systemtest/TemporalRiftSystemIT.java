@@ -126,16 +126,54 @@ class TemporalRiftSystemIT {
         var budgetedSpecial =
                 BUDGETED_SPECIAL_BY_FACTION.get(budgetedEntry.getValue().myFaction());
 
-        playEraOneRoundOne(gameId, host, players, budgetedPlayer, budgetedSpecial);
-        playEraOneRoundTwo(gameId, host, players, budgetedPlayer, budgetedSpecial);
-        playEraOneRoundThree(gameId, host, players);
+        // Both probes now have guaranteed material every run: `hand-deal-forced-types` (e2e-only config,
+        // see compose.e2e.yml) forces TRACE (round-1-ineligible, not player-targeting) and NULLIFY
+        // (player-targeting, not round-restricted) into every player's seven-card deal, and
+        // `chooseEraOneHand` already keeps one of each when selecting the five-card hand. Neither probe can
+        // be asserted on every single call, though — TRACE is only ineligible in round 1, and a probe
+        // consumes no card, so which specific call ends up exercising each one still varies by player/round.
+        // Tracking across the whole scenario and asserting both fired at least once keeps the guarantee
+        // real without hardcoding which call site it happens on.
+        var roundIneligibilityProbed = new boolean[] {false};
+        var playerTargetingProbed = new boolean[] {false};
+
+        playEraOneRoundOne(
+                gameId,
+                host,
+                players,
+                budgetedPlayer,
+                budgetedSpecial,
+                roundIneligibilityProbed,
+                playerTargetingProbed);
+        playEraOneRoundTwo(
+                gameId,
+                host,
+                players,
+                budgetedPlayer,
+                budgetedSpecial,
+                roundIneligibilityProbed,
+                playerTargetingProbed);
+        playEraOneRoundThree(gameId, host, players, roundIneligibilityProbed, playerTargetingProbed);
+
+        assertThat(roundIneligibilityProbed[0])
+                .as("the round-ineligibility rejection (422-12) was exercised at least once")
+                .isTrue();
+        assertThat(playerTargetingProbed[0])
+                .as("the player-targeting counterplay was exercised at least once")
+                .isTrue();
 
         verifyScoresAndLaterEraProjection(gameId, host, players, eraOneStates);
         verifySpecialBudgetResetsInEraTwo(gameId, budgetedPlayer, budgetedSpecial);
     }
 
     private void playEraOneRoundOne(
-            UUID gameId, Actor host, List<Actor> players, Actor budgetedPlayer, String budgetedSpecial) {
+            UUID gameId,
+            Actor host,
+            List<Actor> players,
+            Actor budgetedPlayer,
+            String budgetedSpecial,
+            boolean[] roundIneligibilityProbed,
+            boolean[] playerTargetingProbed) {
         for (var player : players) {
             var state = awaitPlayerAtRound(player, gameId, 1);
             if (player.equals(budgetedPlayer)) {
@@ -144,14 +182,21 @@ class TemporalRiftSystemIT {
                         .playSpecial(gameId, 1, 1, budgetedSpecial, targetEvent.eventId(), targetOutcome(targetEvent))
                         .assertStatus(202);
             } else {
-                submitEligibleAction(player, players, gameId, 1, state);
+                submitEligibleAction(
+                        player, players, gameId, 1, state, roundIneligibilityProbed, playerTargetingProbed);
             }
         }
         awaitRoundClosed(host, gameId, 1, 1, players.size());
     }
 
     private void playEraOneRoundTwo(
-            UUID gameId, Actor host, List<Actor> players, Actor budgetedPlayer, String budgetedSpecial) {
+            UUID gameId,
+            Actor host,
+            List<Actor> players,
+            Actor budgetedPlayer,
+            String budgetedSpecial,
+            boolean[] roundIneligibilityProbed,
+            boolean[] playerTargetingProbed) {
         var otherPlayers = players.stream()
                 .filter(player -> !player.equals(budgetedPlayer))
                 .toList();
@@ -223,12 +268,24 @@ class TemporalRiftSystemIT {
         reuse.assertStatus(409);
         assertThat(reuse.body().path("code").asText()).isEqualTo("409-10");
 
-        submitEligibleAction(plainSubmitter, players, gameId, 2, otherStates.get(plainSubmitter));
+        submitEligibleAction(
+                plainSubmitter,
+                players,
+                gameId,
+                2,
+                otherStates.get(plainSubmitter),
+                roundIneligibilityProbed,
+                playerTargetingProbed);
 
         awaitRoundClosed(host, gameId, 1, 2, players.size());
     }
 
-    private void playEraOneRoundThree(UUID gameId, Actor host, List<Actor> players) {
+    private void playEraOneRoundThree(
+            UUID gameId,
+            Actor host,
+            List<Actor> players,
+            boolean[] roundIneligibilityProbed,
+            boolean[] playerTargetingProbed) {
         var states = players.stream()
                 .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtRound(player, gameId, 3)));
         var submitters = players.stream()
@@ -239,20 +296,31 @@ class TemporalRiftSystemIT {
                 .as("two players need a Round 3-eligible card for the timer-close path")
                 .hasSize(2);
         for (var player : submitters) {
-            submitEligibleAction(player, players, gameId, 3, states.get(player));
+            submitEligibleAction(
+                    player, players, gameId, 3, states.get(player), roundIneligibilityProbed, playerTargetingProbed);
         }
         awaitRoundClosed(host, gameId, 1, 3, submitters.size());
     }
 
     /**
-     * Fills a player's round action. Opportunistically covers two rules that don't always have material to
-     * exercise in a given randomized deal: a round-ineligible card (probed and confirmed non-consuming
-     * before the real submission, if the player happens to hold one) and a player-targeting card (submitted
-     * against a forged, then a real, opponent, if the player happens to hold one — see design.md).
+     * Fills a player's round action. Covers two rules with guaranteed material this scenario forces into
+     * every deal (see {@code hand-deal-forced-types} in compose.e2e.yml): a round-ineligible card, probed
+     * and confirmed non-consuming before the real submission, and a player-targeting card, submitted against
+     * a forged then a real opponent. Which specific call ends up exercising each one still depends on
+     * per-round eligibility and turn order, so both are opportunistic per call — the caller tracks whether
+     * each fires at least once across the whole scenario.
      */
     private void submitEligibleAction(
-            Actor player, List<Actor> allPlayers, UUID gameId, int roundNumber, PlayerState state) {
-        probeRoundIneligibilityIfAvailable(player, gameId, roundNumber, state);
+            Actor player,
+            List<Actor> allPlayers,
+            UUID gameId,
+            int roundNumber,
+            PlayerState state,
+            boolean[] roundIneligibilityProbed,
+            boolean[] playerTargetingProbed) {
+        if (probeRoundIneligibilityIfAvailable(player, gameId, roundNumber, state)) {
+            roundIneligibilityProbed[0] = true;
+        }
 
         var playerTargetingCard = state.hand().stream()
                 .filter(Card::isPlayableThisRound)
@@ -270,36 +338,37 @@ class TemporalRiftSystemIT {
             scenario.as(player)
                     .playCardTargetingPlayer(gameId, 1, roundNumber, card, opponent.playerId())
                     .assertStatus(202);
+            playerTargetingProbed[0] = true;
             return;
         }
 
         playEligibleCard(player, gameId, roundNumber, state);
     }
 
-    private void probeRoundIneligibilityIfAvailable(Actor player, UUID gameId, int roundNumber, PlayerState state) {
-        state.hand().stream()
+    private boolean probeRoundIneligibilityIfAvailable(Actor player, UUID gameId, int roundNumber, PlayerState state) {
+        var ineligibleCard = state.hand().stream()
                 .filter(card -> !card.isPlayableThisRound())
-                .findFirst()
-                .ifPresent(ineligibleCard -> {
-                    var targetEvent = state.activeEvents().getFirst();
-                    var rejected = scenario.as(player)
-                            .playCard(
-                                    gameId,
-                                    1,
-                                    roundNumber,
-                                    ineligibleCard,
-                                    targetEvent.eventId(),
-                                    null,
-                                    targetOutcome(targetEvent));
-                    rejected.assertStatus(422);
-                    assertThat(rejected.body().path("code").asText()).isEqualTo("422-12");
+                .findFirst();
+        if (ineligibleCard.isEmpty()) {
+            return false;
+        }
 
-                    var status = scenario.as(player)
-                            .getRoundStatus(gameId, 1, roundNumber)
-                            .assertStatus(200);
-                    assertThat(RoundState.from(status.body()).pendingPlayerIds())
-                            .contains(player.playerId());
-                });
+        var targetEvent = state.activeEvents().getFirst();
+        var rejected = scenario.as(player)
+                .playCard(
+                        gameId,
+                        1,
+                        roundNumber,
+                        ineligibleCard.get(),
+                        targetEvent.eventId(),
+                        null,
+                        targetOutcome(targetEvent));
+        rejected.assertStatus(422);
+        assertThat(rejected.body().path("code").asText()).isEqualTo("422-12");
+
+        var status = scenario.as(player).getRoundStatus(gameId, 1, roundNumber).assertStatus(200);
+        assertThat(RoundState.from(status.body()).pendingPlayerIds()).contains(player.playerId());
+        return true;
     }
 
     private void playEligibleCard(Actor player, UUID gameId, int roundNumber, PlayerState state) {
@@ -466,6 +535,15 @@ class TemporalRiftSystemIT {
         var kept = new ArrayList<Card>();
         offer.stream()
                 .filter(card -> isRoundRestrictedType(card.cardType()))
+                .findFirst()
+                .ifPresent(kept::add);
+        // Same bias, same reason, for the other opportunistic probe: keep a player-targeting card too if the
+        // deal offers one, so the player-targeting counterplay assertion has material as often as the
+        // round-ineligibility one does — not a guarantee (no deal-override hook exists to force either), but
+        // both probes get the same treatment instead of only one of them being deliberately favored.
+        offer.stream()
+                .filter(card -> !kept.contains(card))
+                .filter(card -> PLAYER_TARGETING_CARD_TYPES.contains(card.cardType()))
                 .findFirst()
                 .ifPresent(kept::add);
         offer.stream()
