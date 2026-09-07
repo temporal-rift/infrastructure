@@ -344,10 +344,10 @@ final class TemporalRiftScenario {
 
     private static boolean requiredBoolean(JsonNode node, String field) {
         var value = node.path(field);
-        if (value.isMissingNode()) {
-            throw new AssertionError("Missing required field: " + field);
+        if (!value.isBoolean()) {
+            throw new AssertionError("Missing or non-boolean required field: " + field);
         }
-        return value.asBoolean();
+        return value.booleanValue();
     }
 
     private static Stream<JsonNode> stream(JsonNode array) {
