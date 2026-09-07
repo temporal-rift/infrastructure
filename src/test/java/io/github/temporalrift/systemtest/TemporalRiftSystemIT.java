@@ -183,11 +183,6 @@ class TemporalRiftSystemIT {
         var gameId = startGameWithThreePlayers(host, playerTwo, playerThree);
         dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseAlwaysPlayableHand);
 
-        var preRevealState = awaitPlayerAtEraRound(host, gameId, 1, 1);
-        assertThat(preRevealState.players())
-                .as("factions stay hidden before FactionRevealed")
-                .allSatisfy(view -> assertThat(view.faction()).isNull());
-
         var finalStates = playUntilGameEnded(gameId, players);
 
         for (var player : players) {
@@ -266,6 +261,13 @@ class TemporalRiftSystemIT {
             var states = players.stream()
                     .collect(Collectors.toMap(
                             player -> player, player -> awaitPlayerAtEraRound(player, gameId, eraNumber, round)));
+            // Checked every round of every era, not just once at the start: a premature reveal in a later
+            // era would otherwise slip past a scenario that only ever looked at era one.
+            for (var state : states.values()) {
+                assertThat(state.players())
+                        .as("factions stay hidden before FactionRevealed (era %d round %d)", eraNumber, round)
+                        .allSatisfy(view -> assertThat(view.faction()).isNull());
+            }
             for (var player : players) {
                 playAnyEligibleAction(player, players, gameId, eraNumber, round, states.get(player));
             }
