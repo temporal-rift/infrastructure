@@ -161,6 +161,17 @@ final class TemporalRiftScenario {
             return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
         }
 
+        // List-mode target transport (api-contract.md §"Request — card action"): SCAN is the only card type
+        // that uses it, one to three distinct event ids, and cannot carry any scalar/player/outcome field.
+        JsonHttpClient.Response playCardTargetingEvents(
+                UUID gameId, int eraNumber, int roundNumber, Card card, List<UUID> targetEventIds) {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("actionType", "CARD");
+            body.put("cardInstanceId", card.cardInstanceId());
+            body.put("targetEventIds", targetEventIds);
+            return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
+        }
+
         JsonHttpClient.Response selectHand(UUID gameId, int eraNumber, List<UUID> keptCardInstanceIds) {
             var body = new LinkedHashMap<String, Object>();
             body.put("keptCardInstanceIds", keptCardInstanceIds);
@@ -204,7 +215,8 @@ final class TemporalRiftScenario {
             List<Card> pendingHand,
             int myScore,
             List<ActiveEvent> activeEvents,
-            List<PlayerView> players) {
+            List<PlayerView> players,
+            List<RevealedIntel> revealedIntel) {
 
         static PlayerState from(JsonNode body) {
             return new PlayerState(
@@ -218,7 +230,43 @@ final class TemporalRiftScenario {
                             .toList(),
                     body.path("myScore").asInt(),
                     stream(body.path("activeEvents")).map(ActiveEvent::from).toList(),
-                    stream(body.path("players")).map(PlayerView::from).toList());
+                    stream(body.path("players")).map(PlayerView::from).toList(),
+                    stream(body.path("myRevealedIntel"))
+                            .filter(node ->
+                                    "PROBABILITY".equals(node.path("kind").asText()))
+                            .map(RevealedIntel::from)
+                            .toList());
+        }
+
+        Optional<RevealedIntel> probabilityIntelFor(UUID eventId) {
+            return revealedIntel.stream()
+                    .filter(entry -> entry.eventId().equals(eventId))
+                    .findFirst();
+        }
+    }
+
+    // Only the PROBABILITY kind (Scan) is parsed here -- INFLUENCE (Trace) and HAND_CARD (Intercept) entries
+    // are out of this harness's scope and are filtered out by PlayerState.from before construction.
+    record RevealedIntel(int observedInRound, UUID eventId, List<RevealedOutcomeProbability> outcomes) {
+
+        static RevealedIntel from(JsonNode body) {
+            return new RevealedIntel(
+                    body.path("observedInRound").asInt(),
+                    uuid(body, "eventId"),
+                    stream(body.path("outcomes"))
+                            .map(RevealedOutcomeProbability::from)
+                            .toList());
+        }
+    }
+
+    record RevealedOutcomeProbability(UUID outcomeId, int probability, boolean isAnnihilated, boolean isSealed) {
+
+        static RevealedOutcomeProbability from(JsonNode body) {
+            return new RevealedOutcomeProbability(
+                    uuid(body, "outcomeId"),
+                    body.path("probability").asInt(),
+                    body.path("isAnnihilated").asBoolean(),
+                    body.path("isSealed").asBoolean());
         }
     }
 

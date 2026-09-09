@@ -11,7 +11,15 @@ services:
     command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
 
   kafka:
-    ports: !override []
+    # Exposed only for this e2e profile (never the shared dev compose.yml), on a dedicated port distinct
+    # from the dev stack's 9092:9092 so a developer's already-running dev compose is never in conflict. The
+    # scan-multi-target-e2e scenario's Kafka fault-injection needs the harness JVM (running on the host) to
+    # bootstrap directly against the PLAINTEXT_HOST listener.
+    ports:
+      - "19092:19092"
+    environment:
+      KAFKA_LISTENERS: PLAINTEXT://:9092,PLAINTEXT_HOST://:19092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:19092
 
   kafka-ui:
     ports: !override []
@@ -44,8 +52,11 @@ services:
       # max-eras: 2 keeps the game-ended lifecycle scenario within the e2e time budget -- it needs the
       # game to reach a terminal state (win, collapse, or stabilization), not to actually play out all
       # five production eras of real card combat.
+      # card-grade-weights biases forced deals toward grade II/III (default is I:60,II:30,III:10) so the
+      # scan-multi-target scenario's forced SCAN reliably resolves at a grade that can target more than one
+      # event, without retrying across games/eras (single-grade cards are unaffected in kind).
       SPRING_APPLICATION_JSON: >-
-        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":60,"4":45,"5":30},"hand-deal-forced-types":["TRACE","NULLIFY"],"max-eras":2}}}
+        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":60,"4":45,"5":30},"hand-deal-forced-types":["TRACE","NULLIFY","SCAN","STALL"],"card-grade-weights":{"I":10,"II":50,"III":40},"max-eras":2}}}
     depends_on:
       e2e-auth:
         condition: service_healthy
