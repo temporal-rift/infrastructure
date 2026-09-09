@@ -161,8 +161,8 @@ final class TemporalRiftScenario {
             return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
         }
 
-        // List-mode target transport (api-contract.md §"Request — card action"): SCAN is the only card type
-        // that uses it, one to three distinct event ids, and cannot carry any scalar/player/outcome field.
+        // List-mode target transport: SCAN is the only card type that uses it, one to three distinct event
+        // ids, and cannot carry any scalar/player/outcome field.
         JsonHttpClient.Response playCardTargetingEvents(
                 UUID gameId, int eraNumber, int roundNumber, Card card, List<UUID> targetEventIds) {
             var body = new LinkedHashMap<String, Object>();
@@ -333,7 +333,7 @@ final class TemporalRiftScenario {
         }
     }
 
-    // `faction` is null on every entry until FactionRevealed fires at game end (api-contract.md §3).
+    // `faction` is null on every entry until FactionRevealed fires at game end.
     record ScoreBoard(int eraNumber, List<PlayerScoreEntry> scores) {
 
         static ScoreBoard from(JsonNode body) {

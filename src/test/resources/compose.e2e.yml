@@ -82,7 +82,7 @@ services:
     environment:
       # Paradoxes are opportunistic in the game-ended lifecycle scenario (it doesn't force or avoid them),
       # and an unresolved paradox force-cascades only after this timer expires. Up to three events can each
-      # open their own resolution phase in reveal order (sagas.md), so the 60s production default could
+      # open their own resolution phase in reveal order, so the 60s production default could
       # serialize past this scenario's per-transition await budget; shortening it here matches game-service's
       # own e2e-only round/hand-selection timer overrides.
       SPRING_APPLICATION_JSON: >-

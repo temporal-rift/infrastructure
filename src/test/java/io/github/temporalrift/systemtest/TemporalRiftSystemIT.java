@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -176,42 +178,20 @@ class TemporalRiftSystemIT {
 
     @Test
     void multiTargetScanDeliversPrivateLiveIntelWithSuppressionCleanupAndKafkaBoundarySafety() {
-        var scanner = Actor.named("Scanner");
-        var victimScanner = Actor.named("Victim scanner");
-        var nullifier = Actor.named("Nullifier");
-        var players = List.of(scanner, victimScanner, nullifier);
+        var setup = setUpScanScenarioWithQualifyingGrade();
+        var gameId = setup.gameId();
+        var mainScanner = setup.mainScanner();
+        var victim = setup.victim();
+        var nullifyingPlayer = setup.nullifyingPlayer();
 
-        var gameId = startGameWithThreePlayers(scanner, victimScanner, nullifier);
-        dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseScanScenarioHand);
-
-        var roundOneStates = players.stream()
-                .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtRound(player, gameId, 1)));
-
-        // Forcing the SCAN *type* into every deal doesn't force its *grade* (WeightedCardDealer still rolls a
-        // weighted grade per forced card), so which of the three players actually got grade II/III is a property
-        // of this run, not something assignable up front -- compose.e2e.yml biases the roll toward II/III, but
-        // this still fails loudly rather than silently degrading to a single-target grade-I run if the roll goes
-        // the other way for everyone.
-        var mainScannerEntry = roundOneStates.entrySet().stream()
-                .filter(entry -> !"I".equals(scanCard(entry.getValue()).grade()))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError("No player's forced SCAN resolved at grade II or III this run: "
-                        + roundOneStates.values().stream()
-                                .map(TemporalRiftSystemIT::scanCard)
-                                .toList()));
-        var mainScanner = mainScannerEntry.getKey();
-        var mainScannerState = mainScannerEntry.getValue();
-        var others =
-                players.stream().filter(player -> !player.equals(mainScanner)).toList();
-        var victim = others.get(0);
-        var nullifyingPlayer = others.get(1);
-
-        var mainScanCard = scanCard(mainScannerState);
+        var mainScanCard = scanCard(setup.mainScannerState());
         var targetCount = targetCountForGrade(mainScanCard.grade());
-        var targetEvents =
-                mainScannerState.activeEvents().stream().limit(targetCount).toList();
+        var targetEvents = setup.mainScannerState().activeEvents().stream()
+                .limit(targetCount)
+                .toList();
         var targetEventIds = targetEvents.stream().map(ActiveEvent::eventId).toList();
 
+        // Round 1: only the main scanner acts; the other two skip and the round closes on timer.
         scenario.as(mainScanner)
                 .playCardTargetingEvents(gameId, 1, 1, mainScanCard, targetEventIds)
                 .assertStatus(202);
@@ -238,106 +218,115 @@ class TemporalRiftSystemIT {
                 .as("a non-scanning player never sees exact values or the scanned selection")
                 .isEmpty();
 
-        // Kafka-boundary fault injection (design.md decision 5): replay one already-real round-1 reveal with a
-        // duplicate envelope eventId. Storage is keyed by (game, viewer, era, event), so this proves the
-        // client-observable contract -- no duplicate projected intel -- rather than the internal dedup path.
-        var replayEnvelopeId = UUID.randomUUID();
-        var replayTarget = targetEvents.getFirst();
-        try (var injector = new KafkaFaultInjector()) {
-            injector.publishProbabilityStateRevealed(
-                    replayEnvelopeId,
-                    gameId,
-                    1,
-                    1,
-                    mainScanner.playerId(),
-                    replayTarget.eventId(),
-                    fabricatedOutcomes(replayTarget));
-            injector.publishProbabilityStateRevealed(
-                    replayEnvelopeId,
-                    gameId,
-                    1,
-                    1,
-                    mainScanner.playerId(),
-                    replayTarget.eventId(),
-                    fabricatedOutcomes(replayTarget));
-        }
-        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
-            var current = scenario.as(mainScanner).getPlayerState(gameId).assertStatus(200);
-            var intel = PlayerState.from(current.body()).revealedIntel();
-            assertThat(intel.stream()
-                            .filter(entry -> entry.eventId().equals(replayTarget.eventId()))
-                            .count())
-                    .as("replayed reveal delivery does not create a duplicate intel entry")
-                    .isEqualTo(1);
-        });
-
-        // Constructed here, before Round 2's actions are even submitted, so its consumer group already has a
-        // confirmed partition assignment before the real BandedProbabilityPublished for Round 2 is produced.
+        // Constructed before Round 2's timer even starts, so its consumer group already has a confirmed
+        // partition assignment before the real BandedProbabilityPublished for Round 2 is produced.
         var bandProbe = new KafkaEventProbe();
 
-        // Round 2: the victim plays their own Scan, which the nullifier cancels in the same round. Neither
-        // targets the main scanner's events, so this round doubles as the "no player action affects a scanned
-        // event" case -- the main scanner's intel still refreshes purely from the round closing.
-        var victimStateRound2 = awaitPlayerAtRound(victim, gameId, 2);
-        var victimScanCard = scanCard(victimStateRound2);
-        var victimTargetEventIds = victimStateRound2.activeEvents().stream()
-                .limit(targetCountForGrade(victimScanCard.grade()))
-                .map(ActiveEvent::eventId)
-                .toList();
-        scenario.as(victim)
-                .playCardTargetingEvents(gameId, 1, 2, victimScanCard, victimTargetEventIds)
-                .assertStatus(202);
-
-        var nullifierStateRound2 = awaitPlayerAtRound(nullifyingPlayer, gameId, 2);
-        var nullifyCard = nullifyCard(nullifierStateRound2);
-        scenario.as(nullifyingPlayer)
-                .playCardTargetingPlayer(gameId, 1, 2, nullifyCard, victim.playerId())
-                .assertStatus(202);
-
-        awaitRoundClosed(mainScanner, gameId, 1, 2, 2);
+        // Round 2: nobody submits anything -- a genuinely actionless round, closed purely by the round timer,
+        // to prove the main scanner's intel still refreshes with zero player actions this round.
+        awaitRoundClosed(mainScanner, gameId, 1, 2, 0);
 
         var afterRoundTwo = scenario.awaitPlayerState(
                 mainScanner,
                 gameId,
                 candidate -> candidate.revealedIntel().size() == targetCount
                         && candidate.revealedIntel().stream().allMatch(entry -> entry.observedInRound() == 2),
-                mainScanner.name() + " receives round-2 refreshed scan intel");
+                mainScanner.name() + " receives round-2 refreshed scan intel from an actionless round");
 
-        var bandCheckEvent = targetEvents.getFirst();
-        var bandCheckOutcomeId = bandCheckEvent.outcomeIds().getFirst();
-        var realBand = bandProbe
-                .awaitBand(gameId, 1, bandCheckEvent.eventId(), bandCheckOutcomeId, Duration.ofSeconds(30))
-                .orElseThrow(() ->
-                        new AssertionError("BandedProbabilityPublished never observed for the scanned event/outcome"));
+        var bandPublication = bandProbe
+                .awaitBandPublication(gameId, 1, Duration.ofSeconds(30))
+                .orElseThrow(() -> new AssertionError("BandedProbabilityPublished never observed for era 1"));
         bandProbe.close();
-        var exactProbability =
-                afterRoundTwo.probabilityIntelFor(bandCheckEvent.eventId()).orElseThrow().outcomes().stream()
-                        .filter(outcome -> outcome.outcomeId().equals(bandCheckOutcomeId))
-                        .findFirst()
-                        .orElseThrow()
-                        .probability();
-        assertThat(bandFor(exactProbability))
-                .as("the scanning player's exact value agrees with the real public band for the same state")
-                .isEqualTo(realBand);
+        for (var event : targetEvents) {
+            var revealed = afterRoundTwo.probabilityIntelFor(event.eventId()).orElseThrow();
+            for (var outcome : revealed.outcomes()) {
+                var realBand = KafkaEventProbe.bandFor(bandPublication, event.eventId(), outcome.outcomeId())
+                        .orElseThrow(() -> new AssertionError(
+                                "No public band for event " + event.eventId() + " outcome " + outcome.outcomeId()));
+                assertThat(bandFor(outcome.probability()))
+                        .as(
+                                "exact value for event %s outcome %s agrees with the real public band",
+                                event.eventId(), outcome.outcomeId())
+                        .isEqualTo(realBand);
+            }
+        }
 
-        var victimAfterRoundTwo = scenario.awaitPlayerState(
-                victim, gameId, candidate -> candidate.eraNumber() == 1, victim.name() + " state after round 2");
-        assertThat(victimAfterRoundTwo.revealedIntel())
-                .as("a same-round Nullify on the Scan suppresses its reveal")
-                .isEmpty();
+        // Reconnect right here, mid-era, before Round 3's Stall/era-end activity could race ahead of the check.
+        var reconnectState = scenario.awaitPlayerState(
+                mainScanner,
+                gameId,
+                candidate -> candidate.revealedIntel().size() == targetCount,
+                mainScanner.name() + " reconnect re-fetch preserves intel");
+        assertThat(reconnectState.revealedIntel().stream()
+                        .map(RevealedIntel::eventId)
+                        .toList())
+                .containsExactlyInAnyOrderElementsOf(targetEventIds);
+        var nullifierReconnect = scenario.awaitPlayerState(
+                nullifyingPlayer,
+                gameId,
+                candidate -> candidate.revealedIntel().isEmpty(),
+                nullifyingPlayer.name() + " reconnect re-fetch still has no scan intel");
+        assertThat(nullifierReconnect.revealedIntel()).isEmpty();
 
-        // Round 3: the victim stalls one of the main scanner's covered events. Only that event's intel should
-        // stop advancing; the scanner's other covered event(s) keep refreshing.
+        // Kafka-boundary fault injection: replay one round-2 reveal with a duplicate envelope id, using
+        // fabricated content distinguishable from the real value. A read-service round-comparison rule that
+        // accepts round >= stored (confirmed in read-service's persistence adapter) means round 2 content
+        // overwrites round 2 content, so waiting for the distinguishable value is what proves the injected
+        // message was actually processed -- asserting the entry count immediately would trivially pass against
+        // the pre-existing real entry without the injection having been consumed at all.
+        var replayEnvelopeId = UUID.randomUUID();
+        var replayTarget = targetEvents.getFirst();
+        var replayOutcomes = fabricatedOutcomes(replayTarget, REPLAY_PROBABILITY_MARKER);
+        try (var injector = new KafkaFaultInjector()) {
+            injector.publishProbabilityStateRevealed(
+                    replayEnvelopeId, gameId, 1, 2, mainScanner.playerId(), replayTarget.eventId(), replayOutcomes);
+            injector.publishProbabilityStateRevealed(
+                    replayEnvelopeId, gameId, 1, 2, mainScanner.playerId(), replayTarget.eventId(), replayOutcomes);
+        }
+        var afterReplay = scenario.awaitPlayerState(
+                mainScanner,
+                gameId,
+                candidate -> candidate
+                        .probabilityIntelFor(replayTarget.eventId())
+                        .map(entry -> entry.outcomes().stream()
+                                .anyMatch(outcome -> outcome.probability() == REPLAY_PROBABILITY_MARKER))
+                        .orElse(false),
+                mainScanner.name() + " observes the injected replay value take effect");
+        assertThat(afterReplay.revealedIntel().stream()
+                        .filter(entry -> entry.eventId().equals(replayTarget.eventId()))
+                        .count())
+                .as("replayed reveal delivery does not create a duplicate intel entry")
+                .isEqualTo(1);
+
+        // Round 3: the victim plays their own Scan (nullified same round); the main scanner Stalls one of
+        // their own covered events. Only that event's intel should stop advancing.
         var victimStateRound3 = awaitPlayerAtRound(victim, gameId, 3);
-        var stallCard = victimStateRound3.hand().stream()
+        var victimScanCard = scanCard(victimStateRound3);
+        var victimTargetEventIds = victimStateRound3.activeEvents().stream()
+                .limit(targetCountForGrade(victimScanCard.grade()))
+                .map(ActiveEvent::eventId)
+                .toList();
+        scenario.as(victim)
+                .playCardTargetingEvents(gameId, 1, 3, victimScanCard, victimTargetEventIds)
+                .assertStatus(202);
+
+        var nullifierStateRound3 = awaitPlayerAtRound(nullifyingPlayer, gameId, 3);
+        var nullifyCard = nullifyCard(nullifierStateRound3);
+        scenario.as(nullifyingPlayer)
+                .playCardTargetingPlayer(gameId, 1, 3, nullifyCard, victim.playerId())
+                .assertStatus(202);
+
+        var mainScannerStateRound3 = awaitPlayerAtRound(mainScanner, gameId, 3);
+        var stallCard = mainScannerStateRound3.hand().stream()
                 .filter(card -> "STALL".equals(card.cardType()))
                 .findFirst()
-                .orElseThrow(() -> new AssertionError("Victim has no STALL card: " + victimStateRound3));
+                .orElseThrow(() -> new AssertionError("Main scanner has no STALL card: " + mainScannerStateRound3));
         var stalledEvent = targetEvents.get(1);
-        scenario.as(victim)
+        scenario.as(mainScanner)
                 .playCard(gameId, 1, 3, stallCard, stalledEvent.eventId(), null, targetOutcome(stalledEvent))
                 .assertStatus(202);
-        awaitRoundClosed(mainScanner, gameId, 1, 3, 1);
+
+        awaitRoundClosed(mainScanner, gameId, 1, 3, 3);
 
         var afterRoundThree = scenario.awaitPlayerState(
                 mainScanner,
@@ -356,27 +345,36 @@ class TemporalRiftSystemIT {
                 .as("the stalled event's intel stops advancing past the round it was stalled")
                 .isEqualTo(2);
 
-        // Reconnect: re-fetching state mid-era must return the same intel, and never leak it to another player.
-        var reconnectState = scenario.awaitPlayerState(
+        // The victim's Scan was nullified this round -- confirm it never produces any reveal. A single read
+        // can't prove an absence (it could simply run before a wrongly-emitted reveal arrives), so this samples
+        // repeatedly across the whole window instead of accepting the first empty result.
+        assertNeverTrue(
+                () -> !PlayerState.from(scenario.as(victim)
+                                .getPlayerState(gameId)
+                                .assertStatus(200)
+                                .body())
+                        .revealedIntel()
+                        .isEmpty(),
+                "a same-round Nullify on the Scan suppresses its reveal",
+                Duration.ofSeconds(10));
+
+        // Deterministic era-end wait (not "era advanced or game ended"): with this scenario's minimal card
+        // play, era 1 reliably transitions to era 2 rather than reaching GAME_ENDED directly, so this
+        // scenario's cleanup assertion is scoped to that path, not a claim about direct game-end cleanup too.
+        var afterEra = scenario.awaitPlayerState(
                 mainScanner,
                 gameId,
-                candidate -> candidate.revealedIntel().size() == targetEventIds.size(),
-                mainScanner.name() + " reconnect re-fetch preserves intel");
-        assertThat(reconnectState.probabilityIntelFor(stalledEvent.eventId())).isPresent();
-        var nullifierReconnect = scenario.awaitPlayerState(
-                nullifyingPlayer,
-                gameId,
-                candidate -> candidate.revealedIntel().isEmpty(),
-                nullifyingPlayer.name() + " reconnect re-fetch still has no scan intel");
-        assertThat(nullifierReconnect.revealedIntel()).isEmpty();
-
-        var afterEra = awaitEraAdvancedOrGameEnded(mainScanner, gameId, 1);
+                candidate ->
+                        candidate.eraNumber() == 2 && candidate.pendingHand().size() == 7,
+                mainScanner.name() + " reaches the era-2 deal");
         assertThat(afterEra.revealedIntel())
-                .as("scan intel is cleared once era 1 ends (or the game ends directly)")
+                .as("scan intel is cleared once era 1 ends")
                 .isEmpty();
 
         // Kafka-boundary fault injection: a stale prior-era reveal delivered after the era boundary must never
-        // resurrect intel into the now-current era's state.
+        // resurrect intel into the now-current era's state. Sampled repeatedly across the window for the same
+        // reason as the Nullify-suppression check above -- a single read after a delay can't prove the state
+        // stays empty for the rest of the window.
         var staleEvent = targetEvents.get(1);
         try (var injector = new KafkaFaultInjector()) {
             injector.publishProbabilityStateRevealed(
@@ -386,14 +384,60 @@ class TemporalRiftSystemIT {
                     3,
                     mainScanner.playerId(),
                     staleEvent.eventId(),
-                    fabricatedOutcomes(staleEvent));
+                    fabricatedOutcomes(staleEvent, DEFAULT_PROBABILITY_MARKER));
         }
-        await().pollDelay(Duration.ofSeconds(5)).atMost(Duration.ofSeconds(15)).untilAsserted(() -> {
-            var current = scenario.as(mainScanner).getPlayerState(gameId).assertStatus(200);
-            assertThat(PlayerState.from(current.body()).probabilityIntelFor(staleEvent.eventId()))
-                    .as("a delayed prior-era reveal must not resurrect intel across the era boundary")
-                    .isEmpty();
-        });
+        assertNeverTrue(
+                () -> PlayerState.from(scenario.as(mainScanner)
+                                .getPlayerState(gameId)
+                                .assertStatus(200)
+                                .body())
+                        .probabilityIntelFor(staleEvent.eventId())
+                        .isPresent(),
+                "a delayed prior-era reveal must not resurrect intel across the era boundary",
+                Duration.ofSeconds(15));
+    }
+
+    private static final int SCAN_GRADE_SETUP_MAX_ATTEMPTS = 5;
+    private static final int REPLAY_PROBABILITY_MARKER = 76;
+    private static final int DEFAULT_PROBABILITY_MARKER = 70;
+
+    private record ScanScenarioSetup(
+            UUID gameId, Actor mainScanner, PlayerState mainScannerState, Actor victim, Actor nullifyingPlayer) {}
+
+    // Forcing the SCAN *type* into every deal doesn't force its *grade* (WeightedCardDealer still rolls a
+    // weighted grade per forced card), so which of the three players -- if any -- gets grade II/III is a
+    // property of a given deal, not something assignable up front. compose.e2e.yml biases the roll toward
+    // II/III (~99.9% at least one qualifies per deal), but a single "fail loudly if none do" attempt still
+    // leaves a real, if small, chance of a random CI failure. Retrying with an entirely fresh game on the rare
+    // all-grade-I deal brings the compound failure probability to roughly 1 in 10^15 -- not a real CI risk --
+    // without weakening the assertion or touching production dealing code.
+    private ScanScenarioSetup setUpScanScenarioWithQualifyingGrade() {
+        for (var attempt = 1; attempt <= SCAN_GRADE_SETUP_MAX_ATTEMPTS; attempt++) {
+            var scanner = Actor.named("Scanner " + attempt);
+            var victimScanner = Actor.named("Victim scanner " + attempt);
+            var nullifier = Actor.named("Nullifier " + attempt);
+            var players = List.of(scanner, victimScanner, nullifier);
+
+            var gameId = startGameWithThreePlayers(scanner, victimScanner, nullifier);
+            dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseScanScenarioHand);
+
+            var roundOneStates = players.stream()
+                    .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtRound(player, gameId, 1)));
+            var qualifying = roundOneStates.entrySet().stream()
+                    .filter(entry -> !"I".equals(scanCard(entry.getValue()).grade()))
+                    .findFirst();
+            if (qualifying.isPresent()) {
+                var mainScanner = qualifying.get().getKey();
+                var others = players.stream()
+                        .filter(player -> !player.equals(mainScanner))
+                        .toList();
+                return new ScanScenarioSetup(
+                        gameId, mainScanner, qualifying.get().getValue(), others.get(0), others.get(1));
+            }
+        }
+        throw new AssertionError("No player's forced SCAN resolved at grade II or III across "
+                + SCAN_GRADE_SETUP_MAX_ATTEMPTS
+                + " independent games -- treat as a card-grade-weight regression, not chance.");
     }
 
     private static Card scanCard(PlayerState state) {
@@ -429,22 +473,41 @@ class TemporalRiftSystemIT {
         return "HIGH";
     }
 
-    // Fabricates a plausible outcome payload for a synthetic fault-injected reveal -- values are arbitrary
-    // (the fault-injection scenarios assert delivery/idempotency/era-scoping behavior, never these values).
-    private static List<Map<String, Object>> fabricatedOutcomes(ActiveEvent event) {
+    // Fabricates a plausible outcome payload for a synthetic fault-injected reveal. `primaryProbability` is a
+    // marker value the caller waits to observe as evidence the injected message was actually processed, not a
+    // value ever asserted as "correct" on its own.
+    private static List<Map<String, Object>> fabricatedOutcomes(ActiveEvent event, int primaryProbability) {
         var outcomes = new ArrayList<Map<String, Object>>();
         for (var index = 0; index < event.outcomeIds().size(); index++) {
             outcomes.add(Map.of(
                     "outcomeId",
                     event.outcomeIds().get(index).toString(),
                     "probability",
-                    index == 0 ? 70 : 15,
+                    index == 0
+                            ? primaryProbability
+                            : (100 - primaryProbability) / (event.outcomeIds().size() - 1),
                     "isAnnihilated",
                     false,
                     "isSealed",
                     false));
         }
         return outcomes;
+    }
+
+    // Samples `conditionAppeared` repeatedly across `window` and fails on the first sample where it holds true,
+    // rather than accepting a single early or late read -- proving a negative (this must never become true)
+    // needs continuous sampling, not a one-shot check that could simply run too early or stop too soon.
+    private static void assertNeverTrue(BooleanSupplier conditionAppeared, String description, Duration window) {
+        var deadline = Instant.now().plus(window);
+        while (Instant.now().isBefore(deadline)) {
+            assertThat(conditionAppeared.getAsBoolean()).as(description).isFalse();
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException interruptedException) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interruptedException);
+            }
+        }
     }
 
     // Keeps SCAN, STALL, and NULLIFY -- all four forced types except TRACE are relevant to this scenario, and
@@ -600,7 +663,7 @@ class TemporalRiftSystemIT {
     private void verifyFinalScoresAgreeAcrossServices(
             UUID gameId, Actor host, List<Actor> players, Map<Actor, PlayerState> finalStates) {
         // FactionRevealed's unidentified-faction bonus is awarded reactively in game-service after
-        // GameEnded already published its score snapshot (temporal-rift-gdd.md §7), so game-service's own
+        // GameEnded already published its score snapshot, so game-service's own
         // /scores can briefly lag read-service's projection. Polling for convergence rather than comparing
         // two independent one-shot reads is what makes this assertion race-free instead of flaky.
         var finalScores = scenario.awaitScores(

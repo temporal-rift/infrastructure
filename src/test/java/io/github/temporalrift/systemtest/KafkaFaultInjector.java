@@ -16,14 +16,15 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Publishes synthetic {@code ProbabilityStateRevealed} facts directly onto {@code timeline.events}, using the
- * header-only envelope convention (event-schema.md §1 -- no JSON wrapper, envelope metadata travels as Kafka
- * headers).
+ * header-only envelope convention -- no JSON wrapper, envelope metadata (eventType, eventId, aggregateId,
+ * aggregateType, gameId, occurredAt, version) travels as Kafka headers and the event body is the payload.
  *
  * <p>Scoped strictly to the two fault-injection assertions this change needs -- replayed delivery and delayed
- * cross-era delivery (design.md decision 5) -- neither of which REST can reproduce (no client can force broker
- * replay or cross-topic reordering). This is never used to shortcut or fabricate the ordinary Scan reveal path;
- * every other assertion goes through the real REST → game-service → Kafka → timeline-service → Kafka →
- * read-service → REST round trip. Real published facts are read by {@link KafkaEventProbe}, not this class.
+ * cross-era delivery, a deliberate design choice made because neither can be reproduced through REST alone (no
+ * client can force broker replay or cross-topic reordering). This is never used to shortcut or fabricate the
+ * ordinary Scan reveal path; every other assertion goes through the real REST → game-service → Kafka →
+ * timeline-service → Kafka → read-service → REST round trip. Real published facts are read by
+ * {@link KafkaEventProbe}, not this class.
  */
 final class KafkaFaultInjector implements AutoCloseable {
 
@@ -70,9 +71,10 @@ final class KafkaFaultInjector implements AutoCloseable {
                 "outcomes",
                 outcomes);
 
-        var record = new ProducerRecord<String, byte[]>(
+        var producerRecord = new ProducerRecord<String, byte[]>(
                 TIMELINE_EVENTS_TOPIC, gameId.toString(), objectMapper.writeValueAsBytes(payload));
-        record.headers()
+        producerRecord
+                .headers()
                 .add("eventType", "ProbabilityStateRevealed".getBytes(StandardCharsets.UTF_8))
                 .add("eventId", envelopeEventId.toString().getBytes(StandardCharsets.UTF_8))
                 .add("aggregateId", eventId.toString().getBytes(StandardCharsets.UTF_8))
@@ -83,7 +85,7 @@ final class KafkaFaultInjector implements AutoCloseable {
 
         try {
             // Blocks for the broker acknowledgement so a subsequent REST poll never races the publish itself.
-            producer.send(record).get();
+            producer.send(producerRecord).get();
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to publish synthetic ProbabilityStateRevealed", exception);
         }
