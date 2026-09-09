@@ -218,70 +218,22 @@ class TemporalRiftSystemIT {
                 .as("a non-scanning player never sees exact values or the scanned selection")
                 .isEmpty();
 
-        // Constructed before Round 2's timer even starts, so its consumer group already has a confirmed
-        // partition assignment before the real BandedProbabilityPublished for Round 2 is produced.
-        var bandProbe = new KafkaEventProbe();
-
-        // Round 2: nobody submits anything -- a genuinely actionless round, closed purely by the round timer,
-        // to prove the main scanner's intel still refreshes with zero player actions this round.
-        awaitRoundClosed(mainScanner, gameId, 1, 2, 0);
-
-        var afterRoundTwo = scenario.awaitPlayerState(
-                mainScanner,
-                gameId,
-                candidate -> candidate.revealedIntel().size() == targetCount
-                        && candidate.revealedIntel().stream().allMatch(entry -> entry.observedInRound() == 2),
-                mainScanner.name() + " receives round-2 refreshed scan intel from an actionless round");
-
-        var bandPublication = bandProbe
-                .awaitBandPublication(gameId, 1, Duration.ofSeconds(30))
-                .orElseThrow(() -> new AssertionError("BandedProbabilityPublished never observed for era 1"));
-        bandProbe.close();
-        for (var event : targetEvents) {
-            var revealed = afterRoundTwo.probabilityIntelFor(event.eventId()).orElseThrow();
-            for (var outcome : revealed.outcomes()) {
-                var realBand = KafkaEventProbe.bandFor(bandPublication, event.eventId(), outcome.outcomeId())
-                        .orElseThrow(() -> new AssertionError(
-                                "No public band for event " + event.eventId() + " outcome " + outcome.outcomeId()));
-                assertThat(bandFor(outcome.probability()))
-                        .as(
-                                "exact value for event %s outcome %s agrees with the real public band",
-                                event.eventId(), outcome.outcomeId())
-                        .isEqualTo(realBand);
-            }
-        }
-
-        // Reconnect right here, mid-era, before Round 3's Stall/era-end activity could race ahead of the check.
-        var reconnectState = scenario.awaitPlayerState(
-                mainScanner,
-                gameId,
-                candidate -> candidate.revealedIntel().size() == targetCount,
-                mainScanner.name() + " reconnect re-fetch preserves intel");
-        assertThat(reconnectState.revealedIntel().stream()
-                        .map(RevealedIntel::eventId)
-                        .toList())
-                .containsExactlyInAnyOrderElementsOf(targetEventIds);
-        var nullifierReconnect = scenario.awaitPlayerState(
-                nullifyingPlayer,
-                gameId,
-                candidate -> candidate.revealedIntel().isEmpty(),
-                nullifyingPlayer.name() + " reconnect re-fetch still has no scan intel");
-        assertThat(nullifierReconnect.revealedIntel()).isEmpty();
-
-        // Kafka-boundary fault injection: replay one round-2 reveal with a duplicate envelope id, using
-        // fabricated content distinguishable from the real value. A read-service round-comparison rule that
-        // accepts round >= stored (confirmed in read-service's persistence adapter) means round 2 content
-        // overwrites round 2 content, so waiting for the distinguishable value is what proves the injected
-        // message was actually processed -- asserting the entry count immediately would trivially pass against
-        // the pre-existing real entry without the injection having been consumed at all.
+        // Kafka-boundary fault injection: replay one round-1 reveal with a duplicate envelope id, using
+        // fabricated content distinguishable from the real value, done right away -- before Round 2's own
+        // timer could close it and legitimately supersede round 1's stored content. Read-service's
+        // round-comparison rule accepts round >= stored (confirmed in its persistence adapter), so any delay
+        // here risks a real round-2 refresh silently making the injected marker unobservable. Waiting for the
+        // distinguishable value is what proves the injected message was actually processed -- asserting the
+        // entry count immediately would trivially pass against the pre-existing real entry without the
+        // injection having been consumed at all.
         var replayEnvelopeId = UUID.randomUUID();
         var replayTarget = targetEvents.getFirst();
         var replayOutcomes = fabricatedOutcomes(replayTarget, REPLAY_PROBABILITY_MARKER);
         try (var injector = new KafkaFaultInjector()) {
             injector.publishProbabilityStateRevealed(
-                    replayEnvelopeId, gameId, 1, 2, mainScanner.playerId(), replayTarget.eventId(), replayOutcomes);
+                    replayEnvelopeId, gameId, 1, 1, mainScanner.playerId(), replayTarget.eventId(), replayOutcomes);
             injector.publishProbabilityStateRevealed(
-                    replayEnvelopeId, gameId, 1, 2, mainScanner.playerId(), replayTarget.eventId(), replayOutcomes);
+                    replayEnvelopeId, gameId, 1, 1, mainScanner.playerId(), replayTarget.eventId(), replayOutcomes);
         }
         var afterReplay = scenario.awaitPlayerState(
                 mainScanner,
@@ -298,8 +250,24 @@ class TemporalRiftSystemIT {
                 .as("replayed reveal delivery does not create a duplicate intel entry")
                 .isEqualTo(1);
 
-        // Round 3: the victim plays their own Scan (nullified same round); the main scanner Stalls one of
-        // their own covered events. Only that event's intel should stop advancing.
+        // Constructed before Round 2's timer even starts, so its consumer group already has a confirmed
+        // partition assignment before the real BandedProbabilityPublished for Round 2 is produced.
+        var bandProbe = new KafkaEventProbe();
+
+        // Round 2: nobody submits anything -- a genuinely actionless round, closed purely by the round timer,
+        // to prove the main scanner's intel still refreshes with zero player actions this round.
+        awaitRoundClosed(mainScanner, gameId, 1, 2, 0);
+
+        var afterRoundTwo = scenario.awaitPlayerState(
+                mainScanner,
+                gameId,
+                candidate -> candidate.revealedIntel().size() == targetCount
+                        && candidate.revealedIntel().stream().allMatch(entry -> entry.observedInRound() == 2),
+                mainScanner.name() + " receives round-2 refreshed scan intel from an actionless round");
+
+        // Round 3's actions are submitted immediately, before any slower Kafka-based verification below --
+        // Round 3 opens as soon as Round 2 closes and starts its own round timer, so anything slow inserted
+        // here risks Round 3 auto-closing with zero submissions before these specific actions land.
         var victimStateRound3 = awaitPlayerAtRound(victim, gameId, 3);
         var victimScanCard = scanCard(victimStateRound3);
         var victimTargetEventIds = victimStateRound3.activeEvents().stream()
@@ -327,6 +295,45 @@ class TemporalRiftSystemIT {
                 .assertStatus(202);
 
         awaitRoundClosed(mainScanner, gameId, 1, 3, 3);
+
+        // Band and reconnect verification below read from afterRoundTwo's already-captured round-2 snapshot,
+        // not a fresh query, so they stay correct even though Round 3 -- already closed above -- has since
+        // refreshed the live projection for the non-stalled events.
+        var bandPublication = bandProbe
+                .awaitBandPublication(gameId, 1, Duration.ofSeconds(30))
+                .orElseThrow(() -> new AssertionError("BandedProbabilityPublished never observed for era 1"));
+        bandProbe.close();
+        for (var event : targetEvents) {
+            var revealed = afterRoundTwo.probabilityIntelFor(event.eventId()).orElseThrow();
+            for (var outcome : revealed.outcomes()) {
+                var realBand = KafkaEventProbe.bandFor(bandPublication, event.eventId(), outcome.outcomeId())
+                        .orElseThrow(() -> new AssertionError(
+                                "No public band for event " + event.eventId() + " outcome " + outcome.outcomeId()));
+                assertThat(bandFor(outcome.probability()))
+                        .as(
+                                "exact value for event %s outcome %s agrees with the real public band",
+                                event.eventId(), outcome.outcomeId())
+                        .isEqualTo(realBand);
+            }
+        }
+
+        // Reconnect: only asserts which events are present, not their round number, so it stays valid
+        // regardless of Round 3 having already refreshed the live projection by this point.
+        var reconnectState = scenario.awaitPlayerState(
+                mainScanner,
+                gameId,
+                candidate -> candidate.revealedIntel().size() == targetCount,
+                mainScanner.name() + " reconnect re-fetch preserves intel");
+        assertThat(reconnectState.revealedIntel().stream()
+                        .map(RevealedIntel::eventId)
+                        .toList())
+                .containsExactlyInAnyOrderElementsOf(targetEventIds);
+        var nullifierReconnect = scenario.awaitPlayerState(
+                nullifyingPlayer,
+                gameId,
+                candidate -> candidate.revealedIntel().isEmpty(),
+                nullifyingPlayer.name() + " reconnect re-fetch still has no scan intel");
+        assertThat(nullifierReconnect.revealedIntel()).isEmpty();
 
         var afterRoundThree = scenario.awaitPlayerState(
                 mainScanner,

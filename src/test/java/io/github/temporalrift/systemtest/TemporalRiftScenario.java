@@ -22,7 +22,10 @@ final class TemporalRiftScenario {
 
     private static final URI GAME_API = URI.create("http://localhost:18080/api/v1");
     private static final URI READ_API = URI.create("http://localhost:18082/api/v1");
-    private static final Duration TRANSITION_TIMEOUT = Duration.ofSeconds(180);
+    // 180s produced a recurring CI-only timeout on gameReachesGameEndedWithAgreeingFinalScoresAndRevealedFactions's
+    // score-convergence wait, independent of PR content (observed identically on unrelated main pushes), which
+    // points to insufficient margin for CI's actual variance rather than a functional bug in that wait itself.
+    private static final Duration TRANSITION_TIMEOUT = Duration.ofSeconds(240);
 
     private final JsonHttpClient http = new JsonHttpClient();
 
