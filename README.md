@@ -208,6 +208,7 @@ assertThat(round.pendingPlayerIds()).containsExactlyInAnyOrder(playerTwo.playerI
 | Timeline and scoring | Action-round resolution; `game-service` and `read-service` scores agree after era completion |
 | Era continuation | Era two projects three active events and a fresh five-card hand (not accumulated from era one), with a durable history record; cascaded events may legitimately carry over |
 | Game end and faction reveal | Game reaches a terminal state (win, collapse, or stabilization) via public entry points only; `game-service` and `read-service` final scores and revealed factions agree; every player's faction is null until `FactionRevealed` and populated for all players afterward; game history is durable through the final era |
+| Multi-target Scan intel | Grade II/III `SCAN` reaches only the scanning player, refreshes every round (including an actionless one) until era end, agrees with the real public band for the same state, and is suppressed by a same-round Nullify or a Stall on the covered event; reconnect preserves it without leaking to another player; era end and direct game end clear it; a delayed prior-era reveal and a replayed message never resurrect or duplicate it — the last two verified by publishing/observing real `timeline.events` traffic directly (`KafkaFaultInjector`/`KafkaEventProbe`), since Kafka is a declared service-to-service boundary for this test, not just REST |
 | Centralized logs | All three services' `app_name` visible in VictoriaLogs; at least one event has non-blank `traceId` and `spanId` |
 
 The system test intentionally complements, rather than duplicates, exhaustive aggregate and adapter tests in each
@@ -218,8 +219,9 @@ service. It concentrates on behavior that crosses process, database, or Kafka bo
 These documented surfaces do not yet have a complete production path and are not simulated as passing E2E behavior:
 
 - paradox-resolution action REST and paradox-resolution saga interaction
-- timeline-service Scan probability-state and Weaver-chain REST endpoints
-- read-service WebSocket notification/filtering
+- Weaver-chain REST endpoints
+- read-service WebSocket notification/filtering (including `BandedProbabilityPublished` fan-out/filtering — the
+  Scan-intel scenario observes the real band directly off `timeline.events` instead, see above)
 - disconnect/reconnect initiation from the absent WebSocket notification path
 - paradox cascade and Weaver-chain accumulation as complete player journeys (the game-end scenario lets paradoxes
   cascade opportunistically but does not force a chain or a specific collapse/stabilization outcome)
