@@ -7,7 +7,6 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -183,6 +182,7 @@ class TemporalRiftSystemIT {
         var mainScanner = setup.mainScanner();
         var victim = setup.victim();
         var nullifyingPlayer = setup.nullifyingPlayer();
+        var allPlayers = List.of(mainScanner, victim, nullifyingPlayer);
 
         var mainScanCard = scanCard(setup.mainScannerState());
         var targetCount = targetCountForGrade(mainScanCard.grade());
@@ -358,9 +358,10 @@ class TemporalRiftSystemIT {
                 "a same-round Nullify on the Scan suppresses its reveal",
                 Duration.ofSeconds(10));
 
-        // Deterministic era-end wait (not "era advanced or game ended"): with this scenario's minimal card
-        // play, era 1 reliably transitions to era 2 rather than reaching GAME_ENDED directly, so this
-        // scenario's cleanup assertion is scoped to that path, not a claim about direct game-end cleanup too.
+        // Deterministic era-end wait (not "era advanced or game ended"): this scenario's era 1 always
+        // transitions to era 2 given its card play, and asserting that specific outcome -- rather than
+        // accepting either branch -- is what makes this a real proof of era-end cleanup. Direct game-end
+        // cleanup is verified separately below, after era 2 is deliberately driven to completion.
         var afterEra = scenario.awaitPlayerState(
                 mainScanner,
                 gameId,
@@ -395,6 +396,54 @@ class TemporalRiftSystemIT {
                         .isPresent(),
                 "a delayed prior-era reveal must not resurrect intel across the era boundary",
                 Duration.ofSeconds(15));
+
+        // Direct game-end cleanup: era 2 is compose.e2e.yml's configured max era, so driving it to completion
+        // deterministically reaches GAME_ENDED (via win, collapse, or stabilization at the max-eras boundary --
+        // the same guarantee gameReachesGameEndedWithAgreeingFinalScoresAndRevealedFactions relies on) rather
+        // than opening an era 3 that doesn't exist. The main scanner plays a fresh Scan in era 2 first, so
+        // there is active current-era intel in place at the moment the game ends directly, not just an
+        // already-empty projection that would trivially satisfy the assertion below.
+        dealAndSelectHand(gameId, allPlayers, 2, TemporalRiftSystemIT::chooseScanScenarioHand);
+
+        var eraTwoScannerState = awaitPlayerAtEraRound(mainScanner, gameId, 2, 1);
+        var eraTwoScanCard = scanCard(eraTwoScannerState);
+        var eraTwoTargetEventIds = eraTwoScannerState.activeEvents().stream()
+                .limit(targetCountForGrade(eraTwoScanCard.grade()))
+                .map(ActiveEvent::eventId)
+                .toList();
+        scenario.as(mainScanner)
+                .playCardTargetingEvents(gameId, 2, 1, eraTwoScanCard, eraTwoTargetEventIds)
+                .assertStatus(202);
+        awaitRoundClosed(mainScanner, gameId, 2, 1, 1);
+
+        var eraTwoIntel = scenario.awaitPlayerState(
+                mainScanner,
+                gameId,
+                candidate ->
+                        candidate.eraNumber() == 2 && !candidate.revealedIntel().isEmpty(),
+                mainScanner.name() + " has active era-2 scan intel before the game ends");
+        assertThat(eraTwoIntel.revealedIntel()).isNotEmpty();
+
+        for (var roundNumber = 2; roundNumber <= 3; roundNumber++) {
+            var round = roundNumber;
+            var states = allPlayers.stream()
+                    .collect(Collectors.toMap(
+                            player -> player, player -> awaitPlayerAtEraRound(player, gameId, 2, round)));
+            for (var player : allPlayers) {
+                playAnyEligibleAction(player, allPlayers, gameId, 2, round, states.get(player));
+            }
+        }
+
+        var afterGameEnd = scenario.awaitPlayerState(
+                mainScanner,
+                gameId,
+                candidate -> "GAME_ENDED".equals(candidate.phase()),
+                mainScanner.name() + " reaches GAME_ENDED directly from era 2");
+        assertThat(afterGameEnd.revealedIntel())
+                .as("scan intel is cleared when the game ends directly, not only at an era boundary")
+                .isEmpty();
+        assertThat(afterGameEnd.probabilityIntelFor(eraTwoTargetEventIds.getFirst()))
+                .isEmpty();
     }
 
     private static final int SCAN_GRADE_SETUP_MAX_ATTEMPTS = 5;
@@ -494,20 +543,16 @@ class TemporalRiftSystemIT {
         return outcomes;
     }
 
-    // Samples `conditionAppeared` repeatedly across `window` and fails on the first sample where it holds true,
-    // rather than accepting a single early or late read -- proving a negative (this must never become true)
-    // needs continuous sampling, not a one-shot check that could simply run too early or stop too soon.
+    // Samples `conditionAppeared` repeatedly across `window`, via Awaitility's own polling rather than a raw
+    // Thread.sleep loop, and fails on the first sample where it holds true. `during(window)` is what makes this
+    // prove a negative -- the assertion must keep passing for the *entire* window, not just once -- while
+    // `atMost` only bounds the operation itself and is never expected to be the reason this returns.
     private static void assertNeverTrue(BooleanSupplier conditionAppeared, String description, Duration window) {
-        var deadline = Instant.now().plus(window);
-        while (Instant.now().isBefore(deadline)) {
-            assertThat(conditionAppeared.getAsBoolean()).as(description).isFalse();
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException interruptedException) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(interruptedException);
-            }
-        }
+        await().atMost(window.plusSeconds(5))
+                .during(window)
+                .untilAsserted(() -> assertThat(conditionAppeared.getAsBoolean())
+                        .as(description)
+                        .isFalse());
     }
 
     // Keeps SCAN, STALL, and NULLIFY -- all four forced types except TRACE are relevant to this scenario, and
