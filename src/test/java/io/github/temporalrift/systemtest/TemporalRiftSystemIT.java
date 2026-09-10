@@ -2,6 +2,7 @@ package io.github.temporalrift.systemtest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -19,12 +20,16 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.extension.TestWatcher;
 
 import io.github.temporalrift.systemtest.TemporalRiftScenario.ActiveEvent;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.Card;
@@ -192,7 +197,13 @@ class TemporalRiftSystemIT {
     @Nested
     @TestInstance(TestInstance.Lifecycle.PER_CLASS)
     @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+    @ExtendWith(MultiTargetScanScenario.AbortRemainingStepsOnFailure.class)
     class MultiTargetScanScenario {
+
+        // JUnit runs the remaining steps of an ordered class after one fails, and every step here reads state
+        // an earlier one assigned -- so without this, one real failure becomes nine, eight of them unrelated
+        // NPEs burying the one that matters. Static because @ExtendWith constructs the watcher itself.
+        private static boolean earlierStepFailed;
 
         private UUID gameId;
         private Actor mainScanner;
@@ -207,6 +218,19 @@ class TemporalRiftSystemIT {
         private PlayerState afterRoundTwo;
         private List<UUID> eraTwoTargetEventIds;
         private KafkaEventProbe bandProbe;
+
+        static class AbortRemainingStepsOnFailure implements TestWatcher {
+            @Override
+            public void testFailed(ExtensionContext context, Throwable cause) {
+                earlierStepFailed = true;
+            }
+        }
+
+        // Reports the steps after a failure as skipped rather than as spurious failures of their own.
+        @BeforeEach
+        void skipOnceAStepHasFailed() {
+            assumeFalse(earlierStepFailed, "an earlier step of this scenario failed");
+        }
 
         // Closed here rather than by try-with-resources: the probe is opened in one step and read in a later
         // one, and @AfterAll still releases the consumer if any step in between fails.
