@@ -1,0 +1,53 @@
+# Served only to the Config Client whose spring.application.name is game-service, layered on top of
+# application.yml's shared game.rules.probability namespace. Values here mirror what game-service's own
+# application.yml currently hard-codes; game-service is not yet reading them from here.
+game:
+  rate-limit:
+    requests-per-minute: 120
+    cleanup-interval: 60s
+  request-body-limit:
+    max-bytes: 1048576
+  timers:
+    event-resubmit-min-age: 2m
+    event-resubmit-interval: 30s
+    action-round-sweep-interval: 1s
+    hand-selection-sweep-interval: 1s
+    reconnect-sweep-interval: 1s
+    scoring-completion-sweep-interval: 1s
+    era-saga-scores-updated-sweep-interval: 1s
+  rules:
+    min-players: 3
+    max-players: 5
+    max-eras: 5
+    max-cascaded-paradoxes: 3
+    events-per-era: 3
+    cards-per-hand: 5
+    cards-per-deal: 7
+    win-score-threshold: 20
+    reconnect-grace-period-seconds: 30
+    action-round-timer-seconds:
+      3: 60
+      4: 45
+      5: 30
+    hand-selection-timer-seconds:
+      3: 60
+      4: 45
+      5: 30
+    card-category-weights:
+      PROBABILITY_SHIFTER: 35
+      INFORMATION: 25
+      DISRUPTION: 25
+      PARADOX: 15
+    card-grade-weights:
+      I: 60
+      II: 30
+      III: 10
+    stabilization-winner-factions:
+      - PROPHETS
+      - WEAVERS
+    once-era-budgeted-specials:
+      - ANNIHILATE
+      - SEAL
+      - CORRUPT
+      - MIMIC
+    hand-deal-forced-types: []

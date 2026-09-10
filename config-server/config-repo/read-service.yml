@@ -1,0 +1,10 @@
+# Served only to the Config Client whose spring.application.name is read-service. Values here mirror what
+# read-service's own application.yml currently hard-codes; read-service is not yet a Config Client, so this
+# file has no effect until it is onboarded (see this repo's README, "Onboarding a new service as a Config
+# Client").
+notification:
+  websocket:
+    allowed-origins: ${NOTIFICATION_WEBSOCKET_ALLOWED_ORIGINS:http://localhost:*}
+    send-time-limit: 10s
+    send-buffer-size: 512KB
+    max-pending-messages: 256

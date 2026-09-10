@@ -1,0 +1,13 @@
+# Served only to the Config Client whose spring.application.name is timeline-service, layered on top of
+# application.yml's shared game.rules.probability namespace. Values here mirror what timeline-service's own
+# application.yml currently hard-codes; timeline-service is not yet reading them from here.
+game:
+  rules:
+    probability:
+      floor: 0
+      ceiling: 90
+      momentum-bonus: 10
+      rally-multiplier: 1.5
+    paradox-resolution-timer-seconds: 60
+  timers:
+    paradox-resolution-sweep-interval: 1s
