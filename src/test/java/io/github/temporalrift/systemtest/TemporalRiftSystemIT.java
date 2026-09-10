@@ -421,14 +421,27 @@ class TemporalRiftSystemIT {
                 mainScanner.name() + " has active era-2 scan intel before the game ends");
         assertThat(eraTwoIntel.revealedIntel()).isNotEmpty();
 
-        for (var roundNumber = 2; roundNumber <= 3; roundNumber++) {
-            var round = roundNumber;
-            var states = allPlayers.stream()
-                    .collect(Collectors.toMap(
-                            player -> player, player -> awaitPlayerAtEraRound(player, gameId, 2, round)));
-            for (var player : allPlayers) {
-                playAnyEligibleAction(player, allPlayers, gameId, 2, round, states.get(player));
-            }
+        // Round 2 is left genuinely actionless -- nobody submits anything, so it closes purely on its own
+        // timer -- which proves an active Scan still refreshes with zero player actions in the round.
+        // Era 2 is where this is provable: era 1's round 3 is also actionless, but era 1 ends within about
+        // a second of it closing, so its refresh is never observable.
+        awaitRoundClosed(mainScanner, gameId, 2, 2, 0);
+        var afterActionlessRound = scenario.awaitPlayerState(
+                mainScanner,
+                gameId,
+                candidate -> candidate.eraNumber() == 2
+                        && eraTwoTargetEventIds.stream()
+                                .allMatch(eventId -> candidate
+                                        .probabilityIntelFor(eventId)
+                                        .map(entry -> entry.observedInRound() == 2)
+                                        .orElse(false)),
+                mainScanner.name() + " receives round-2 refreshed scan intel from a round nobody acted in");
+        assertThat(afterActionlessRound.revealedIntel()).isNotEmpty();
+
+        var roundThreeStates = allPlayers.stream()
+                .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtEraRound(player, gameId, 2, 3)));
+        for (var player : allPlayers) {
+            playAnyEligibleAction(player, allPlayers, gameId, 2, 3, roundThreeStates.get(player));
         }
 
         var afterGameEnd = scenario.awaitPlayerState(
