@@ -50,10 +50,11 @@ curl http://localhost:8888/application/default
 Alongside `application.yml`, the config repo also has one file per service —
 `config-server/config-repo/game-service.yml`, `timeline-service.yml`, and `read-service.yml` — served only to the
 Config Client whose `spring.application.name` matches the file's base name, layered on top of the shared
-`application.yml` values. Each currently holds a copy of that service's own app-level tunables (e.g.
-game-service's `game.rate-limit`, `game.timers`, and `game.rules.*`; read-service's `notification.websocket.*`),
-mirroring what that service's own `application.yml` still hard-codes today — actually switching a service over to
-read its copy from here instead of its local file is a separate, per-service migration.
+`application.yml` values. `read-service` is onboarded and reads `notification.websocket.*` from here; its own
+`application.yml` no longer hard-codes those values. `game-service.yml` and `timeline-service.yml` still hold a
+copy of app-level tunables (e.g. `game.rate-limit`, `game.timers`, `game.rules.*`) that each of those services'
+own `application.yml` also still hard-codes today — actually switching either of them over to read its copy from
+here instead of its local file is a separate, per-service migration.
 
 ### Onboarding a new service as a Config Client
 
