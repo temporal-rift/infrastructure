@@ -248,8 +248,7 @@ class TemporalRiftSystemIT {
                 gameId,
                 candidate -> candidate
                         .probabilityIntelFor(replayTarget.eventId())
-                        .map(entry -> entry.outcomes().stream()
-                                .anyMatch(outcome -> outcome.probability() == REPLAY_PROBABILITY_MARKER))
+                        .map(entry -> matchesFabricatedOutcomes(entry, replayTarget, REPLAY_PROBABILITY_MARKER))
                         .orElse(false),
                 mainScanner.name() + " observes the injected replay value take effect");
         assertThat(afterReplay.revealedIntel().stream()
@@ -531,21 +530,37 @@ class TemporalRiftSystemIT {
     // marker value the caller waits to observe as evidence the injected message was actually processed, not a
     // value ever asserted as "correct" on its own.
     private static List<Map<String, Object>> fabricatedOutcomes(ActiveEvent event, int primaryProbability) {
-        var outcomes = new ArrayList<Map<String, Object>>();
-        for (var index = 0; index < event.outcomeIds().size(); index++) {
-            outcomes.add(Map.of(
-                    "outcomeId",
-                    event.outcomeIds().get(index).toString(),
-                    "probability",
-                    index == 0
-                            ? primaryProbability
-                            : (100 - primaryProbability) / (event.outcomeIds().size() - 1),
-                    "isAnnihilated",
-                    false,
-                    "isSealed",
-                    false));
+        return expectedFabricatedProbabilities(event, primaryProbability).entrySet().stream()
+                .map(entry -> Map.<String, Object>of(
+                        "outcomeId",
+                        entry.getKey().toString(),
+                        "probability",
+                        entry.getValue(),
+                        "isAnnihilated",
+                        false,
+                        "isSealed",
+                        false))
+                .toList();
+    }
+
+    private static Map<UUID, Integer> expectedFabricatedProbabilities(ActiveEvent event, int primaryProbability) {
+        var outcomeIds = event.outcomeIds();
+        var secondary = (100 - primaryProbability) / (outcomeIds.size() - 1);
+        var expected = new LinkedHashMap<UUID, Integer>();
+        for (var index = 0; index < outcomeIds.size(); index++) {
+            expected.put(outcomeIds.get(index), index == 0 ? primaryProbability : secondary);
         }
-        return outcomes;
+        return expected;
+    }
+
+    // A single matching probability isn't enough evidence a real reveal couldn't produce it by chance --
+    // this requires every outcome to match the complete fabricated distribution exactly.
+    private static boolean matchesFabricatedOutcomes(RevealedIntel entry, ActiveEvent event, int primaryProbability) {
+        var expected = expectedFabricatedProbabilities(event, primaryProbability);
+        return entry.outcomes().size() == expected.size()
+                && entry.outcomes().stream()
+                        .allMatch(outcome ->
+                                Integer.valueOf(outcome.probability()).equals(expected.get(outcome.outcomeId())));
     }
 
     // Samples `conditionAppeared` repeatedly across `window`, via Awaitility's own polling rather than a raw
