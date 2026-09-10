@@ -394,12 +394,16 @@ class TemporalRiftSystemIT {
                 "a delayed prior-era reveal must not resurrect intel across the era boundary",
                 Duration.ofSeconds(15));
 
-        // Direct game-end cleanup: era 2 is compose.e2e.yml's configured max era, so driving it to completion
-        // deterministically reaches GAME_ENDED (via win, collapse, or stabilization at the max-eras boundary --
-        // the same guarantee gameReachesGameEndedWithAgreeingFinalScoresAndRevealedFactions relies on) rather
-        // than opening an era 3 that doesn't exist. The main scanner plays a fresh Scan in era 2 first, so
-        // there is active current-era intel in place at the moment the game ends directly, not just an
-        // already-empty projection that would trivially satisfy the assertion below.
+        verifyEraTwoRefreshesAndClearsIntelAtGameEnd(gameId, mainScanner, allPlayers);
+    }
+
+    // Direct game-end cleanup: era 2 is compose.e2e.yml's configured max era, so driving it to completion
+    // deterministically reaches GAME_ENDED (via win, collapse, or stabilization at the max-eras boundary --
+    // the same guarantee gameReachesGameEndedWithAgreeingFinalScoresAndRevealedFactions relies on) rather
+    // than opening an era 3 that doesn't exist. The main scanner plays a fresh Scan in era 2 first, so
+    // there is active current-era intel in place at the moment the game ends directly, not just an
+    // already-empty projection that would trivially satisfy the assertion below.
+    private void verifyEraTwoRefreshesAndClearsIntelAtGameEnd(UUID gameId, Actor mainScanner, List<Actor> allPlayers) {
         dealAndSelectHand(gameId, allPlayers, 2, TemporalRiftSystemIT::chooseScanScenarioHand);
 
         var eraTwoScannerState = awaitPlayerAtEraRound(mainScanner, gameId, 2, 1);
