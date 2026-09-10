@@ -114,7 +114,7 @@ Prerequisites:
 - Docker with Compose v2.24.4 or newer (the test override uses the Compose `!override` tag)
 - Maven 3.9.16 or newer
 - JDK 26 selected through `JAVA_HOME` and first on `PATH`
-- host ports `18080`, `18082`, `15341`, and `22201` available
+- host ports `18080`, `18082`, `15341`, `22201`, and `19092` available
 
 Run from this repository:
 
@@ -123,8 +123,8 @@ mvn verify -Pe2e
 ```
 
 The test project is named `temporal-rift-e2e` and uses host ports `18080` (game-service), `18082` (read-service),
-`15341` (VictoriaLogs UI/query), and `22201` (VictoriaLogs syslog listener), so it can run beside the normal local
-stack. At the beginning of each run, only a stale `temporal-rift-e2e` project is reset. The post-integration-test
+`15341` (VictoriaLogs UI/query), `22201` (VictoriaLogs syslog listener), and `19092` (Kafka, for test-only
+fault-injection/probe clients), so it can run beside the normal local stack. At the beginning of each run, only a stale `temporal-rift-e2e` project is reset. The post-integration-test
 phase removes only that same project.
 
 If Maven or the machine is interrupted before post-integration-test, recover with:

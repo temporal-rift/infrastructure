@@ -34,14 +34,13 @@ import tools.jackson.databind.ObjectMapper;
 final class KafkaEventProbe implements AutoCloseable {
 
     private static final String TIMELINE_EVENTS_TOPIC = "timeline.events";
-    private static final String BOOTSTRAP_SERVERS = "localhost:19092";
 
     private final KafkaConsumer<String, byte[]> consumer;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     KafkaEventProbe() {
         var properties = new Properties();
-        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
+        properties.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, E2eKafka.BOOTSTRAP_SERVERS);
         properties.put(ConsumerConfig.GROUP_ID_CONFIG, "e2e-band-probe-" + UUID.randomUUID());
         properties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());

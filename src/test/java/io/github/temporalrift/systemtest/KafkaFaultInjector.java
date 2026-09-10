@@ -29,14 +29,13 @@ import tools.jackson.databind.ObjectMapper;
 final class KafkaFaultInjector implements AutoCloseable {
 
     private static final String TIMELINE_EVENTS_TOPIC = "timeline.events";
-    private static final String BOOTSTRAP_SERVERS = "localhost:19092";
 
     private final KafkaProducer<String, byte[]> producer;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     KafkaFaultInjector() {
         var properties = new Properties();
-        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, BOOTSTRAP_SERVERS);
+        properties.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, E2eKafka.BOOTSTRAP_SERVERS);
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class.getName());
         producer = new KafkaProducer<>(properties);
