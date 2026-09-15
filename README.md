@@ -10,8 +10,9 @@ start the stack with:
 docker compose -f infrastructure/compose.yml up --build
 ```
 
-The stack starts the three services, PostgreSQL (one database per service), Kafka, Kafka UI, Zipkin, VictoriaLogs, and
-a Config Server. It also creates `game.events`, `timeline.events`, `game.commands`, and one source-specific
+The stack starts the three services, PostgreSQL (one database per service), Kafka, Kafka UI, Zipkin, VictoriaLogs, a
+Config Server, and the metrics/dashboards/alerting stack described below. It also creates `game.events`,
+`timeline.events`, `game.commands`, and one source-specific
 dead-letter topic for each of them, all with three
 partitions before the services start. Each service waits for a healthy Zipkin server before starting, so its startup
 spans are retained. Set `JWT_ISSUER_URI` to a reachable issuer before using authenticated game-service or read-service
@@ -23,6 +24,10 @@ endpoints.
 | Zipkin distributed traces | http://localhost:9411/zipkin/ |
 | Kafka UI | http://localhost:8083 |
 | Config Server | http://localhost:8888 |
+| Grafana dashboards | http://localhost:3000 |
+| VictoriaMetrics | http://localhost:8428 |
+| vmalert | http://localhost:8880 |
+| Alertmanager | http://localhost:9093 |
 
 ## Kafka topic security, retention, and data lifecycle
 
@@ -166,6 +171,49 @@ ports `9428` or `514` from a shared or production host without designing authent
 control. Docker's default dual-logging cache normally keeps `docker logs` usable; VictoriaLogs is the supported
 cross-service log view for this stack.
 
+## Metrics, dashboards, and alerts
+
+The stack scrapes Kafka-broker-level metrics (via a `kafka-exporter` sidecar) and each service's application
+metrics into VictoriaMetrics, renders them on provisioned Grafana dashboards, and evaluates configuration-driven
+alert rules with vmalert. Config lives under `observability/` in this repository:
+
+| Component | Config |
+|---|---|
+| VictoriaMetrics scrape targets | `observability/victoriametrics/scrape.yml` |
+| Grafana datasource/dashboard provisioning | `observability/grafana/provisioning/`, dashboards in `observability/grafana/dashboards/` |
+| Alert rules and thresholds | `observability/vmalert/rules.yml` |
+| Alertmanager routing | `observability/alertmanager/alertmanager.yml` |
+
+**Available today, no service-side change required** — `kafka-exporter` reads consumer-group and topic offsets
+directly from the broker, so these work as soon as the stack is up:
+
+- **Consumer lag**, by consumer group, topic, and partition (`kafka_consumergroup_lag`) — Grafana's "Consumer lag"
+  dashboard, alerted by `KafkaConsumerGroupLagHigh` when a group's lag exceeds the threshold in `rules.yml`.
+- **Dead-letter traffic**, on `game.events.dlq`, `timeline.events.dlq`, and `game.commands.dlq`
+  (`kafka_topic_partition_current_offset`) — Grafana's "Dead-letter traffic" dashboard, alerted by
+  `KafkaDeadLetterTrafficDetected` on any offset increase.
+
+**Pending a linked cross-repo dependency** — `game-service`'s era-saga sweep-recovery counter and
+`timeline-service`'s and `read-service`'s Kafka consumer-skip counters already exist, but none of the three
+services yet expose a Prometheus scrape endpoint (`GET /actuator/prometheus`) — see
+[temporal-rift/infrastructure#37](https://github.com/temporal-rift/infrastructure/issues/37)'s Cross-Repo
+Dependencies, and the linked `game-service#200`, `timeline-service#101`, `read-service#88`. Grafana's "Version
+skips" and "Sweep recoveries" dashboards, and their scrape jobs in `scrape.yml`, are already wired to the correct
+metric names and will show data the moment each dependency lands — no dashboard or infra change needed then.
+
+Change an alert threshold by editing `observability/vmalert/rules.yml` and restarting the `vmalert` container — it
+is not a code constant. Validate a rule change without a running broker:
+
+```bash
+bash scripts/verify-alert-rules.sh
+```
+
+This topology is intentionally development/showcase only, matching the rest of this stack's posture: Grafana runs
+with anonymous admin access enabled, and no component here integrates real paging (email, Slack, PagerDuty). A
+firing alert is observable through Alertmanager's own API (`GET http://localhost:9093/api/v2/alerts`), not
+delivered anywhere external. Do not expose these ports from a shared or production host without designing
+authentication and real notification routing first.
+
 ## End-to-end verification
 
 The infrastructure repository also owns the black-box system test. It builds and starts all three services with
@@ -177,7 +225,7 @@ Prerequisites:
 - Docker with Compose v2.24.4 or newer (the test override uses the Compose `!override` tag)
 - Maven 3.9.16 or newer
 - JDK 26 selected through `JAVA_HOME` and first on `PATH`
-- host ports `18080`, `18082`, `15341`, `22201`, and `19092` available
+- host ports `18080`, `18082`, `15341`, `22201`, `19092`, `19308`, and `19411` available
 
 Run from this repository:
 
@@ -186,8 +234,9 @@ mvn verify -Pe2e
 ```
 
 The test project is named `temporal-rift-e2e` and uses host ports `18080` (game-service), `18082` (read-service),
-`15341` (VictoriaLogs UI/query), `22201` (VictoriaLogs syslog listener), and `19092` (Kafka, for test-only
-fault-injection/probe clients), so it can run beside the normal local stack. At the beginning of each run, only a stale `temporal-rift-e2e` project is reset. The post-integration-test
+`15341` (VictoriaLogs UI/query), `22201` (VictoriaLogs syslog listener), `19092` (Kafka, for test-only
+fault-injection/probe clients), `19308` (kafka-exporter, for the dead-letter-traffic proof), and `19411` (Zipkin,
+for the trace-continuity proof), so it can run beside the normal local stack. At the beginning of each run, only a stale `temporal-rift-e2e` project is reset. The post-integration-test
 phase removes only that same project.
 
 If Maven or the machine is interrupted before post-integration-test, recover with:
@@ -273,6 +322,8 @@ assertThat(round.pendingPlayerIds()).containsExactlyInAnyOrder(playerTwo.playerI
 | Game end and faction reveal | Game reaches a terminal state (win, collapse, or stabilization) via public entry points only; `game-service` and `read-service` final scores and revealed factions agree; every player's faction is null until `FactionRevealed` and populated for all players afterward; game history is durable through the final era |
 | Multi-target Scan intel | Grade II/III `SCAN` reaches only the scanning player, refreshes each round, including a round in which nobody acted at all, agrees with the real public band for the same state, and is suppressed by a same-round Nullify or a Stall on the covered event; reconnect preserves it without leaking to another player; era end and direct game end clear it; a delayed prior-era reveal and a replayed message never resurrect or duplicate it — the last two verified by publishing/observing real `timeline.events` traffic directly (`KafkaFaultInjector`/`KafkaEventProbe`), since Kafka is a declared service-to-service boundary for this test, not just REST |
 | Centralized logs | All three services' `app_name` visible in VictoriaLogs; at least one event has non-blank `traceId` and `spanId` |
+| Trace continuity | One Zipkin trace links spans from `game-service`, `timeline-service`, and `read-service` for a game-start flow that crosses all three |
+| Dead-letter observability | A record published directly to `game.events.dlq` (`KafkaFaultInjector`) is reflected in `kafka-exporter`'s offset metric for that topic |
 
 The system test intentionally complements, rather than duplicates, exhaustive aggregate and adapter tests in each
 service. It concentrates on behavior that crosses process, database, or Kafka boundaries.
