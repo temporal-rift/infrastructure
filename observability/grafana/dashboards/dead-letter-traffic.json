@@ -26,8 +26,8 @@
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Dead-letter records parked (5m rate)",
-      "description": "Rate of increase of each dead-letter topic's offset over a 5-minute window.",
+      "title": "Dead-letter records parked (5m count)",
+      "description": "Count of each dead-letter topic's offset increase over a trailing 5-minute window (same increase() semantics as the KafkaDeadLetterTrafficDetected alert rule).",
       "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "victoriametrics" },
       "targets": [

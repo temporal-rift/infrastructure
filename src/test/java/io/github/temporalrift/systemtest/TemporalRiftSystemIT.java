@@ -1414,8 +1414,10 @@ class TemporalRiftSystemIT {
     // reliably log the game ID on this flow's happy path, and read-service logs nothing at all on its own
     // success path (see assertCentralizedLogMetadata), so no log line is a dependable source for the ID.
     private void assertOneTraceLinksAllThreeServices(Instant flowStart) {
+        // No pre-flowStart padding: this flow's spans can only start at or after flowStart, and padding the
+        // window earlier risks matching a different flow's trace that happened to run just before this one.
         var lookbackMillis =
-                Math.max(1000, Duration.between(flowStart, Instant.now()).toMillis() + 10_000);
+                Math.max(1000, Duration.between(flowStart, Instant.now()).toMillis());
         var endTsMillis = Instant.now().toEpochMilli();
         var uri = URI.create(ZIPKIN_TRACES_BASE_URL + "?serviceName=read-service&limit=50&lookback=" + lookbackMillis
                 + "&endTs=" + endTsMillis);
@@ -1459,7 +1461,12 @@ class TemporalRiftSystemIT {
     private static String fetchRawBody(URI uri) {
         try {
             var response = HttpClient.newHttpClient()
-                    .send(HttpRequest.newBuilder(uri).GET().build(), HttpResponse.BodyHandlers.ofString());
+                    .send(
+                            HttpRequest.newBuilder(uri)
+                                    .timeout(Duration.ofSeconds(5))
+                                    .GET()
+                                    .build(),
+                            HttpResponse.BodyHandlers.ofString());
             return response.body();
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to fetch " + uri, exception);
