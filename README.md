@@ -23,6 +23,47 @@ endpoints.
 | Kafka UI | http://localhost:8083 |
 | Config Server | http://localhost:8888 |
 
+## Kafka topic security, retention, and data lifecycle
+
+`compose.yml`'s topic-provisioning step (`scripts/provision-kafka-topics.sh`) pins an explicit `retention.ms` on
+every topic instead of leaving it at the broker default, matching its class: `game.events` and `timeline.events`
+(domain replay window, 7 days), `game.commands` (transient commands, 1 day), and `game.dlq` (extended dead-letter,
+30 days — long enough to investigate a parked poison message). The script re-applies retention on every run, so a
+topic that already exists with a different value is reconciled rather than left as-is.
+
+Local development stays plaintext with no broker authentication or authorization by design — that friction has no
+place in an inner dev loop. `compose.secure.yml` is a wholly separate, standalone Compose stack (own broker, own
+ports, own project name `temporal-rift-secure`) that demonstrates the authenticated, least-privilege topology
+intended for any environment outside local development: SASL/PLAIN authentication and a deny-by-default KRaft
+`StandardAuthorizer`, with `scripts/provision-kafka-acls.sh` granting each service identity only the topics and
+consumer groups its own code actually uses — no wildcards. It never runs as part of the local dev stack; bring it
+up on its own to inspect it:
+
+```bash
+docker compose -f infrastructure/compose.secure.yml up --build --wait
+```
+
+The `security-e2e` Maven profile (`mvn verify -Psecurity-e2e`, from this repository) boots that stack and proves
+it automatically: an identity's authorized produce/consume succeeds, an identity's attempt outside its granted set
+fails with `TopicAuthorizationException`, that denial is recorded in the broker's own `kafka-authorizer.log`
+naming the principal and resource, and every topic's retention matches its documented class. The SASL/PLAIN
+credentials in `compose.secure.yml` are local/CI-only demo values that exist only in that file — a real deployment
+outside local development would source real credentials from a secrets manager and very likely add TLS
+(`SASL_SSL`) underneath, both intentionally out of scope for this demonstration.
+
+### Erasing one player's data
+
+An erasure request for a player must be followed through every carrier of player-identifying event payloads:
+
+| Carrier | How the player's data is removed |
+|---|---|
+| `game.events`, `timeline.events`, `game.commands` | Self-expiring: no action needed once the topic's retention window (see above) elapses. There is no compaction or manual tombstoning of these topics — a request that cannot wait out the retention window is not satisfiable by these topics alone. |
+| `game.dlq` | Same as above, on its own 30-day window. |
+| `game-service`'s database | Durable — does not expire on its own. Delete the player's rows from every table that references their player id (lobby membership, hand/selection state, action history, score records) via that service's own migrations/tooling; do not rely on retention. |
+| `timeline-service`'s database | Durable. Its event-sourced store retains `FutureEvent` history; delete or redact rows referencing the player's id the same way. |
+| `read-service`'s database | Durable. Delete the player's projection rows (game state, game history, player-game-state) the same way. |
+| Centralized logs (VictoriaLogs) | Durable but not indexed by player id — a targeted deletion requires a manual LogsQL query against the player's known identifiers (game/player UUIDs) followed by VictoriaLogs' own deletion API; there is no automatic per-player purge. |
+
 ## Shared configuration with Spring Cloud Config Server
 
 `config-server` is a small Spring Boot app (`config-server/`, built from this repo) serving configuration values

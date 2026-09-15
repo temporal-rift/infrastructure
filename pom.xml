@@ -159,6 +159,152 @@
                                     <goal>integration-test</goal>
                                     <goal>verify</goal>
                                 </goals>
+                                <configuration>
+                                    <!-- Explicit rather than relying on the default **/*IT.java pattern, so
+                                         that adding an IT class under a different profile's test package
+                                         (e.g. systemtest/security/) can never change what this profile runs. -->
+                                    <includes>
+                                        <include>**/TemporalRiftSystemIT.java</include>
+                                    </includes>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <!-- Proves infrastructure#38's authenticated, least-privilege-authorized Kafka topology.
+                 Boots a wholly separate, standalone stack (compose.secure.yml, project name
+                 temporal-rift-secure) with its own broker and ports, never compose.yml or
+                 compose.e2e.yml, so the local dev flow and the `e2e` profile's suite are both
+                 untouched by this profile existing. -->
+            <id>security-e2e</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>${maven.exec.version}</version>
+                        <executions>
+                            <execution>
+                                <id>reset-secure-system-under-test</id>
+                                <phase>pre-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>docker</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>compose</argument>
+                                        <argument>-f</argument>
+                                        <argument>compose.secure.yml</argument>
+                                        <argument>down</argument>
+                                        <argument>-v</argument>
+                                        <argument>--remove-orphans</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>start-secure-system-under-test</id>
+                                <phase>pre-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>docker</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>compose</argument>
+                                        <argument>-f</argument>
+                                        <argument>compose.secure.yml</argument>
+                                        <argument>up</argument>
+                                        <argument>--build</argument>
+                                        <argument>--wait</argument>
+                                        <argument>--wait-timeout</argument>
+                                        <argument>180</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <!-- The "up" execution's wait flag only waits for kafka-secure-provision to
+                                     be running, not to finish: it has no healthcheck, and that flag
+                                     considers a healthcheck-less container ready as soon as it starts.
+                                     kafka-acls.sh spins up a fresh JVM per grant, so the provisioning script
+                                     can still be mid-run (topics created, ACLs partially granted) once the
+                                     previous execution returns. This "wait" subcommand instead blocks until
+                                     the container actually exits and fails the build on a nonzero code. -->
+                                <id>await-secure-provisioning</id>
+                                <phase>pre-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>docker</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>compose</argument>
+                                        <argument>-f</argument>
+                                        <argument>compose.secure.yml</argument>
+                                        <argument>wait</argument>
+                                        <argument>kafka-secure-provision</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <!-- Declared before stop-secure-system-under-test for the same reason as
+                                     the e2e profile's capture-e2e-diagnostics: same-phase executions of one
+                                     plugin run in POM declaration order, and the stack must still exist. -->
+                                <id>capture-security-e2e-diagnostics</id>
+                                <phase>post-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>sh</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>src/test/resources/capture-security-e2e-diagnostics.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>stop-secure-system-under-test</id>
+                                <phase>post-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>docker</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>compose</argument>
+                                        <argument>-f</argument>
+                                        <argument>compose.secure.yml</argument>
+                                        <argument>down</argument>
+                                        <argument>-v</argument>
+                                        <argument>--remove-orphans</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                                <configuration>
+                                    <includes>
+                                        <include>**/security/*IT.java</include>
+                                    </includes>
+                                </configuration>
                             </execution>
                         </executions>
                     </plugin>
