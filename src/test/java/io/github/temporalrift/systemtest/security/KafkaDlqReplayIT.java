@@ -45,22 +45,26 @@ class KafkaDlqReplayIT {
             var records = new ArrayList<org.apache.kafka.clients.consumer.ConsumerRecord<byte[], byte[]>>();
             await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
                 consumer.poll(Duration.ofMillis(500)).forEach(records::add);
-                assertThat(records).anySatisfy(record -> {
-                    assertThat(new String(record.key(), StandardCharsets.UTF_8)).isEqualTo(selectedGameId);
-                    assertThat(new String(record.value(), StandardCharsets.UTF_8))
+                assertThat(records).anySatisfy(consumerRecord -> {
+                    assertThat(new String(consumerRecord.key(), StandardCharsets.UTF_8))
+                            .isEqualTo(selectedGameId);
+                    assertThat(new String(consumerRecord.value(), StandardCharsets.UTF_8))
                             .isEqualTo("selected-payload");
-                    assertThat(headerValue(record, "eventId")).isEqualTo(eventId);
-                    assertThat(headerValue(record, "kafka_dlt-exception-fqcn")).isNull();
+                    assertThat(headerValue(consumerRecord, "eventId")).isEqualTo(eventId);
+                    assertThat(headerValue(consumerRecord, "kafka_dlt-exception-fqcn"))
+                            .isNull();
                 });
             });
             assertThat(records)
-                    .noneMatch(record -> new String(record.key(), StandardCharsets.UTF_8).equals(otherGameId));
+                    .noneMatch(consumerRecord ->
+                            new String(consumerRecord.key(), StandardCharsets.UTF_8).equals(otherGameId));
         }
     }
 
     @Test
     void rejectsADeadLetterTopicAsAReplaySource() {
-        assertThatThrownBy(() -> KafkaDlqReplay.replay(SecureKafka.adminProperties(), "game.events.dlq", "game"))
+        var connectionProperties = SecureKafka.adminProperties();
+        assertThatThrownBy(() -> KafkaDlqReplay.replay(connectionProperties, "game.events.dlq", "game"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unsupported source topic");
     }
@@ -85,8 +89,8 @@ class KafkaDlqReplayIT {
     }
 
     private static String headerValue(
-            org.apache.kafka.clients.consumer.ConsumerRecord<byte[], byte[]> record, String key) {
-        var header = record.headers().lastHeader(key);
+            org.apache.kafka.clients.consumer.ConsumerRecord<byte[], byte[]> consumerRecord, String key) {
+        var header = consumerRecord.headers().lastHeader(key);
         return header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }
 }
