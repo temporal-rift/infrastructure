@@ -17,14 +17,16 @@ import tools.jackson.databind.ObjectMapper;
 /**
  * Publishes synthetic {@code ProbabilityStateRevealed} facts directly onto {@code timeline.events}, using the
  * header-only envelope convention -- no JSON wrapper, envelope metadata (eventType, eventId, aggregateId,
- * aggregateType, gameId, occurredAt, version) travels as Kafka headers and the event body is the payload.
+ * aggregateType, gameId, occurredAt, version) travels as Kafka headers and the event body is the payload -- plus a
+ * generic dead-letter-topic publisher for the lag-dlq-sweep-observability capability's exporter-to-metric proof.
  *
- * <p>Scoped strictly to the two fault-injection assertions this change needs -- replayed delivery and delayed
- * cross-era delivery, a deliberate design choice made because neither can be reproduced through REST alone (no
- * client can force broker replay or cross-topic reordering). This is never used to shortcut or fabricate the
- * ordinary Scan reveal path; every other assertion goes through the real REST → game-service → Kafka →
- * timeline-service → Kafka → read-service → REST round trip. Real published facts are read by
- * {@link KafkaEventProbe}, not this class.
+ * <p>Scoped strictly to fault-injection assertions that can't be reproduced through REST alone -- replayed
+ * delivery, delayed cross-era delivery, and direct dead-letter-topic writes -- a deliberate design choice, since
+ * none of the three can be triggered by any client (no client can force broker replay, cross-topic reordering, or
+ * a specific poison-detection/retry-exhaustion path). This is never used to shortcut or fabricate the ordinary
+ * Scan reveal path; every other assertion goes through the real REST → game-service → Kafka → timeline-service →
+ * Kafka → read-service → REST round trip. Real published facts are read by {@link KafkaEventProbe}, not this
+ * class.
  */
 final class KafkaFaultInjector implements AutoCloseable {
 
@@ -87,6 +89,23 @@ final class KafkaFaultInjector implements AutoCloseable {
             producer.send(producerRecord).get();
         } catch (Exception exception) {
             throw new IllegalStateException("Failed to publish synthetic ProbabilityStateRevealed", exception);
+        }
+    }
+
+    /**
+     * Publishes a synthetic record directly onto a named dead-letter topic, proving the
+     * lag-dlq-sweep-observability capability's exporter-to-metric path against a real broker without depending on
+     * any consumer's own retry/backoff timing -- that poison-detection and retry-exhaustion path is already each
+     * service's own tested responsibility (see {@code kafka-consumer-failure-handling}). The acceptance scenario
+     * this proves is "any record parked on a dead-letter topic", not a specific arrival mechanism.
+     */
+    void publishToDeadLetterTopic(String deadLetterTopic, byte[] value) {
+        var producerRecord = new ProducerRecord<String, byte[]>(
+                deadLetterTopic, UUID.randomUUID().toString(), value);
+        try {
+            producer.send(producerRecord).get();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to publish synthetic dead-letter record", exception);
         }
     }
 

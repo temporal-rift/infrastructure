@@ -25,12 +25,33 @@ services:
     ports: !override []
 
   zipkin:
-    ports: !override []
+    # Dedicated e2e-only host port, distinct from the dev stack's 9411:9411, so the harness JVM (running on the
+    # host) can query Zipkin's API directly to prove trace continuity (see TemporalRiftSystemIT).
+    ports: !override
+      - "127.0.0.1:19411:9411"
 
   victorialogs:
     ports: !override
       - "127.0.0.1:15341:9428"
       - "127.0.0.1:22201:514"
+
+  kafka-exporter:
+    # Dedicated e2e-only host port, distinct from the dev stack's 9308:9308, so the harness JVM (running on the
+    # host) can poll it directly to prove dead-letter traffic reaches the exporter (see TemporalRiftSystemIT).
+    ports: !override
+      - "127.0.0.1:19308:9308"
+
+  victoriametrics:
+    ports: !override []
+
+  grafana:
+    ports: !override []
+
+  alertmanager:
+    ports: !override []
+
+  vmalert:
+    ports: !override []
 
   e2e-auth:
     image: nginx:1.27-alpine
