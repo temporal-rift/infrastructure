@@ -173,9 +173,10 @@ cross-service log view for this stack.
 
 ## Metrics, dashboards, and alerts
 
-The stack scrapes Kafka-broker-level metrics (via a `kafka-exporter` sidecar) and each service's application
-metrics into VictoriaMetrics, renders them on provisioned Grafana dashboards, and evaluates configuration-driven
-alert rules with vmalert. Config lives under `observability/` in this repository:
+The stack scrapes Kafka-broker-level metrics (via a `kafka-exporter` sidecar) into VictoriaMetrics today, and is
+already configured to also scrape each service's application metrics once available (see below), renders them on
+provisioned Grafana dashboards, and evaluates configuration-driven alert rules with vmalert. Config lives under
+`observability/` in this repository:
 
 | Component | Config |
 |---|---|
