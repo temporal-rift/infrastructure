@@ -1,0 +1,97 @@
+name: temporal-rift-secure
+
+# Demonstrates and proves the authenticated, least-privilege-authorized broker topology intended
+# for any environment outside local development (see infrastructure#38 and
+# openspec/changes/kafka-topic-security-retention-erasure in the workspace's OpenSpec store for
+# the full rationale). This is a wholly separate, standalone stack — its own broker, its own
+# ports, its own Compose project name — never merged into the plaintext local dev compose.yml or
+# the existing compose.e2e.yml system-e2e stack, so neither is affected by anything here.
+#
+# SASL/PLAIN with a static, checked-in JAAS credential map is a deliberate choice for this
+# demonstration only: it proves broker-enforced authentication and least-privilege authorization
+# without adding the bootstrap-ordering complexity SCRAM would need in KRaft mode. These
+# passwords are local/CI-only demo values, never used outside this file, and a real non-local
+# deployment would source real credentials from a secrets manager and very likely add TLS
+# (SASL_SSL) underneath — both intentionally out of scope here.
+services:
+  kafka-secure:
+    image: apache/kafka:3.7.0
+    environment:
+      CLUSTER_ID: b2VjdXJlLWRlbW8tY2x1c3Rlcg
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: SASL_PLAINTEXT://:9092,SASL_PLAINTEXT_HOST://:39092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: SASL_PLAINTEXT://kafka-secure:9092,SASL_PLAINTEXT_HOST://localhost:39092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: SASL_PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,SASL_PLAINTEXT:SASL_PLAINTEXT,SASL_PLAINTEXT_HOST:SASL_PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-secure:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      # The image's own configure script requires KAFKA_OPTS to be set (even to a no-op value)
+      # whenever any listener is SASL_*; it only warns, rather than fails, when KAFKA_OPTS lacks
+      # a java.security.auth.login.config property, since our JAAS config is supplied per listener
+      # via KAFKA_LISTENER_NAME_*_SASL_JAAS_CONFIG below instead of a static login config file.
+      KAFKA_OPTS: "-Dtemporal-rift.kafka-secure-demo=true"
+      # Authentication: SASL/PLAIN, one static JAAS credential map shared by both listeners.
+      # `username`/`password` (no `user_` prefix) is the broker's own identity for inter-broker
+      # connections; each `user_<name>` entry is a recognized client identity.
+      KAFKA_SASL_ENABLED_MECHANISMS: PLAIN
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+      # The Kafka image's env-var translator maps a single "_" to "." — a literal underscore
+      # inside a listener name (SASL_PLAINTEXT, SASL_PLAINTEXT_HOST) must therefore be doubled
+      # ("__") in the env var name, or it resolves to the wrong (nonexistent) property and the
+      # listener falls back to a static java.security.auth.login.config file that doesn't exist.
+      KAFKA_LISTENER_NAME_SASL__PLAINTEXT_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="admin" password="admin-local-demo-secret"
+        user_admin="admin-local-demo-secret"
+        user_game-service="game-service-local-demo-secret"
+        user_timeline-service="timeline-service-local-demo-secret"
+        user_read-service="read-service-local-demo-secret";
+      KAFKA_LISTENER_NAME_SASL__PLAINTEXT__HOST_PLAIN_SASL_JAAS_CONFIG: >-
+        org.apache.kafka.common.security.plain.PlainLoginModule required
+        username="admin" password="admin-local-demo-secret"
+        user_admin="admin-local-demo-secret"
+        user_game-service="game-service-local-demo-secret"
+        user_timeline-service="timeline-service-local-demo-secret"
+        user_read-service="read-service-local-demo-secret";
+      # Authorization: deny by default, ACLs granted explicitly below by provision-kafka-acls.sh.
+      KAFKA_AUTHORIZER_CLASS_NAME: org.apache.kafka.metadata.authorizer.StandardAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "false"
+      # User:ANONYMOUS is the principal on the plaintext, host-unpublished CONTROLLER listener used
+      # for this single-node broker's own controller-quorum registration — it must be a super user
+      # or the broker cannot even register itself with its own controller. It grants nothing to an
+      # external client: SASL_PLAINTEXT listeners require a successful SASL handshake before any
+      # request is processed, so no client-facing connection can present as ANONYMOUS.
+      KAFKA_SUPER_USERS: User:admin;User:ANONYMOUS
+    ports:
+      - "39092:39092"
+    volumes:
+      - ./scripts/kafka-admin-client.properties:/etc/kafka/secure-provision/admin.properties:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092
+          --command-config /etc/kafka/secure-provision/admin.properties --list >/dev/null 2>&1
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  kafka-secure-provision:
+    image: apache/kafka:3.7.0
+    volumes:
+      - ./scripts:/scripts:ro
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        /scripts/provision-kafka-topics.sh kafka-secure:9092 /scripts/kafka-admin-client.properties
+        /scripts/provision-kafka-acls.sh kafka-secure:9092 /scripts/kafka-admin-client.properties
+    depends_on:
+      kafka-secure:
+        condition: service_healthy

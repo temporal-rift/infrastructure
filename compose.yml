@@ -45,14 +45,12 @@ services:
 
   kafka-topics:
     image: apache/kafka:3.7.0
+    volumes:
+      - ./scripts/provision-kafka-topics.sh:/scripts/provision-kafka-topics.sh:ro
     entrypoint:
       - /bin/bash
-      - -ec
-      - |
-        for topic in game.events timeline.events game.commands game.dlq; do
-          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists \
-            --topic "$${topic}" --partitions 3 --replication-factor 1
-        done
+      - /scripts/provision-kafka-topics.sh
+      - kafka:9092
     depends_on:
       kafka:
         condition: service_healthy

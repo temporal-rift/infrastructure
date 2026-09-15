@@ -1,0 +1,64 @@
+name: Security E2E
+
+# Runs the authenticated, least-privilege Kafka topology proof (`mvn verify -Psecurity-e2e`), for
+# infrastructure#38. Independent of system-e2e.yml: it boots compose.secure.yml, a wholly separate
+# standalone stack with no application-service dependency, so unlike system-e2e this workflow needs
+# no sibling-repository checkouts and is not invoked via workflow_call.
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-e2e-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-e2e:
+    name: security-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Maven Action
+        uses: s4u/setup-maven-action@ba34de01b7f4ba2ab8e2860df8993a29f4477056 # v1.20.0
+        with:
+          java-version: 26
+          java-distribution: temurin
+          maven-version: 3.9.13
+          settings-githubServer: false
+
+      - name: Cache Maven packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-security-e2e-${{ hashFiles('pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-security-e2e-
+
+      - name: Run security E2E
+        run: mvn --batch-mode verify -Psecurity-e2e
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: security-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: target/security-e2e-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Failsafe's post-integration-test teardown does not run if the job is cancelled or the JVM
+      # dies. Scoped to compose.secure.yml's own project name, so it cannot touch system-e2e's
+      # temporal-rift-e2e project or a developer's local temporal-rift dev stack.
+      - name: Tear down secure system under test
+        if: always()
+        run: docker compose -f compose.secure.yml down -v --remove-orphans
