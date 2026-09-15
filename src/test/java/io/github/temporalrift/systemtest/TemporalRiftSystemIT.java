@@ -6,10 +6,15 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import java.net.URI;
 import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,6 +22,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.AfterAll;
@@ -46,6 +52,10 @@ class TemporalRiftSystemIT {
             victoriaLogsQueryUri("* | unpack_json | traceId:* | spanId:* | limit 1");
     private static final List<String> CENTRALIZED_LOG_SERVICE_TAGS =
             List.of("game-service", "timeline-service", "read-service");
+    private static final URI KAFKA_EXPORTER_METRICS_URI = URI.create("http://localhost:19308/metrics");
+    private static final String ZIPKIN_TRACES_BASE_URL = "http://localhost:19411/zipkin/api/v2/traces";
+    private static final Set<String> TRACE_CONTINUITY_SERVICE_NAMES =
+            Set.of("game-service", "timeline-service", "read-service");
 
     // Player-targeting cards carry only targetPlayerId (no event/outcome fields) per action.yml's oneOf
     // constraint. JAM is both player-targeting and round-three-ineligible; isPlayableThisRound already
@@ -83,6 +93,47 @@ class TemporalRiftSystemIT {
         await().atMost(Duration.ofSeconds(30))
                 .pollInterval(Duration.ofSeconds(1))
                 .untilAsserted(this::assertCentralizedLogMetadata);
+    }
+
+    @Test
+    void oneTraceLinksGameTimelineAndProjectionHops() {
+        var host = Actor.named("Trace host");
+        var second = Actor.named("Trace second");
+        var third = Actor.named("Trace third");
+
+        var flowStart = Instant.now();
+        var gameId = startGameWithThreePlayers(host, second, third);
+        scenario.awaitPlayerState(
+                host,
+                gameId,
+                candidate ->
+                        candidate.eraNumber() == 1 && candidate.activeEvents().size() == 3,
+                "read-service projects era-one state for the trace-continuity flow");
+
+        // Zipkin's reporter batches and flushes spans asynchronously, so the full trace may not be visible
+        // immediately after read-service's projection responds.
+        await().atMost(Duration.ofSeconds(30))
+                .pollInterval(Duration.ofSeconds(1))
+                .untilAsserted(() -> assertOneTraceLinksAllThreeServices(flowStart));
+    }
+
+    @Test
+    void deadLetterTrafficIsObservableByTheKafkaExporter() {
+        var deadLetterTopic = "game.events.dlq";
+        var offsetBefore = deadLetterTopicOffsetSum(deadLetterTopic);
+
+        try (var faultInjector = new KafkaFaultInjector()) {
+            faultInjector.publishToDeadLetterTopic(
+                    deadLetterTopic, "synthetic-dead-letter-record".getBytes(StandardCharsets.UTF_8));
+        }
+
+        await().atMost(Duration.ofSeconds(30))
+                .pollInterval(Duration.ofSeconds(1))
+                .untilAsserted(() -> assertThat(deadLetterTopicOffsetSum(deadLetterTopic))
+                        .as(
+                                "kafka-exporter's %s offset sum increases after a record is published to it",
+                                deadLetterTopic)
+                        .isGreaterThan(offsetBefore));
     }
 
     @Test
@@ -1356,5 +1407,62 @@ class TemporalRiftSystemIT {
     private static URI victoriaLogsQueryUri(String logsQlQuery) {
         var query = URLEncoder.encode(logsQlQuery, StandardCharsets.UTF_8);
         return URI.create("http://localhost:15341/select/logsql/query?query=" + query);
+    }
+
+    // Proves trace continuity by asking Zipkin itself for a trace with spans from all three services, rather
+    // than correlating a trace ID through service log content -- game-service and timeline-service don't
+    // reliably log the game ID on this flow's happy path, and read-service logs nothing at all on its own
+    // success path (see assertCentralizedLogMetadata), so no log line is a dependable source for the ID.
+    private void assertOneTraceLinksAllThreeServices(Instant flowStart) {
+        var lookbackMillis =
+                Math.max(1000, Duration.between(flowStart, Instant.now()).toMillis() + 10_000);
+        var endTsMillis = Instant.now().toEpochMilli();
+        var uri = URI.create(ZIPKIN_TRACES_BASE_URL + "?serviceName=read-service&limit=50&lookback=" + lookbackMillis
+                + "&endTs=" + endTsMillis);
+        var traces = httpClient.get(uri, null).assertStatus(200).body();
+
+        var matchingTraceFound = false;
+        for (var trace : traces) {
+            var observedServiceNames = new HashSet<String>();
+            for (var span : trace) {
+                var serviceName = span.path("localEndpoint").path("serviceName").asText(null);
+                if (serviceName != null) {
+                    observedServiceNames.add(serviceName);
+                }
+            }
+            if (observedServiceNames.containsAll(TRACE_CONTINUITY_SERVICE_NAMES)) {
+                matchingTraceFound = true;
+                break;
+            }
+        }
+        assertThat(matchingTraceFound)
+                .as(
+                        "at least one trace in the last %d ms links spans from %s",
+                        lookbackMillis, TRACE_CONTINUITY_SERVICE_NAMES)
+                .isTrue();
+    }
+
+    private static long deadLetterTopicOffsetSum(String topic) {
+        var metricsBody = fetchRawBody(KAFKA_EXPORTER_METRICS_URI);
+        var offsetLinePattern = Pattern.compile("kafka_topic_partition_current_offset\\{partition=\"\\d+\",topic=\""
+                + Pattern.quote(topic) + "\"} (\\d+)");
+        var matcher = offsetLinePattern.matcher(metricsBody);
+        var sum = 0L;
+        while (matcher.find()) {
+            sum += Long.parseLong(matcher.group(1));
+        }
+        return sum;
+    }
+
+    // kafka-exporter's /metrics endpoint returns Prometheus text exposition format, not JSON -- JsonHttpClient
+    // always parses the response body as JSON, so it can't be reused for this one non-JSON endpoint.
+    private static String fetchRawBody(URI uri) {
+        try {
+            var response = HttpClient.newHttpClient()
+                    .send(HttpRequest.newBuilder(uri).GET().build(), HttpResponse.BodyHandlers.ofString());
+            return response.body();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Failed to fetch " + uri, exception);
+        }
     }
 }
