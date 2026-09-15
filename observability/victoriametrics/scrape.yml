@@ -1,0 +1,25 @@
+# Prometheus-compatible scrape config read by VictoriaMetrics (-promscrape.config). An unreachable target (all
+# three application services today, until each exposes /actuator/prometheus -- see infrastructure#37) does not
+# block scraping the others; VictoriaMetrics reports it as a down target instead of failing the whole scrape cycle.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: kafka-exporter
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  - job_name: game-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["game-service:8080"]
+
+  - job_name: timeline-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["timeline-service:8080"]
+
+  - job_name: read-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["read-service:8080"]

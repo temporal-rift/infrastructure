@@ -1,0 +1,30 @@
+groups:
+  - name: consumer-lag
+    interval: 15s
+    rules:
+      # Threshold is this literal, not a code constant -- an operator changes it here and vmalert
+      # picks it up on its next config reload, no service or container rebuild. 1000 is an
+      # illustrative dev/demo default; tune per topic traffic in a real deployment.
+      - alert: KafkaConsumerGroupLagHigh
+        expr: kafka_consumergroup_lag > 1000
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Consumer group {{ $labels.consumergroup }} is lagging on {{ $labels.topic }}/{{ $labels.partition }}"
+          description: >-
+            Consumer group {{ $labels.consumergroup }} has {{ $value }} records of lag on
+            {{ $labels.topic }} partition {{ $labels.partition }}, past the configured threshold.
+
+  - name: dead-letter-traffic
+    interval: 15s
+    rules:
+      - alert: KafkaDeadLetterTrafficDetected
+        expr: increase(kafka_topic_partition_current_offset{topic=~".+\\.dlq"}[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead-letter traffic on {{ $labels.topic }}"
+          description: >-
+            {{ $value }} record(s) landed on dead-letter topic {{ $labels.topic }} partition
+            {{ $labels.partition }} in the last 5 minutes.

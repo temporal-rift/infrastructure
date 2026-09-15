@@ -1,0 +1,12 @@
+# Dev/demo only: no real notification integration (email, Slack, PagerDuty) is configured here by
+# design -- see README.md "Metrics, dashboards, and alerts". Firing alerts are observable through
+# Alertmanager's own API (GET http://localhost:9093/api/v2/alerts), not delivered anywhere external.
+route:
+  receiver: local-only
+  group_by: [consumergroup, topic]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: local-only

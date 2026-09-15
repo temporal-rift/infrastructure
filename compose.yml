@@ -71,6 +71,16 @@ services:
     ports:
       - "9411:9411"
 
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.10.0
+    command:
+      - "--kafka.server=kafka:9092"
+    ports:
+      - "9308:9308"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
   config-server:
     build:
       context: ./config-server
@@ -93,6 +103,60 @@ services:
     ports:
       - "127.0.0.1:9428:9428"
       - "127.0.0.1:514:514"
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.152.0
+    command:
+      - "-promscrape.config=/etc/victoriametrics/scrape.yml"
+    volumes:
+      - ./observability/victoriametrics/scrape.yml:/etc/victoriametrics/scrape.yml:ro
+      - victoriametrics-data:/victoria-metrics-data
+    ports:
+      - "127.0.0.1:8428:8428"
+    depends_on:
+      kafka-exporter:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:13.0.9
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      victoriametrics:
+        condition: service_started
+
+  alertmanager:
+    image: prom/alertmanager:v0.34.0
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "127.0.0.1:9093:9093"
+
+  vmalert:
+    image: victoriametrics/vmalert:v1.152.0
+    command:
+      - "-datasource.url=http://victoriametrics:8428"
+      - "-remoteRead.url=http://victoriametrics:8428"
+      - "-remoteWrite.url=http://victoriametrics:8428"
+      - "-notifier.url=http://alertmanager:9093"
+      - "-rule=/etc/vmalert/rules.yml"
+      - "-evaluationInterval=15s"
+    volumes:
+      - ./observability/vmalert/rules.yml:/etc/vmalert/rules.yml:ro
+    ports:
+      - "127.0.0.1:8880:8880"
+    depends_on:
+      victoriametrics:
+        condition: service_started
+      alertmanager:
+        condition: service_started
 
   game-service:
     build:
@@ -200,3 +264,4 @@ services:
 volumes:
   postgres-data:
   victorialogs-data:
+  victoriametrics-data:
