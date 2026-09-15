@@ -25,11 +25,21 @@ endpoints.
 
 ## Kafka topic security, retention, and data lifecycle
 
+<!-- kafka-topology:start -->
+| Topic | Channel class | Purpose |
+|---|---|---|
+| `game.events` | Domain events | Carries events produced by game-service for timeline-service and read-service. |
+| `timeline.events` | Domain events | Carries resolved timeline events for game-service and read-service. |
+| `game.commands` | Commands | Carries commands for game-service. |
+| `game.dlq` | Dead-letter | Holds records that cannot be processed after retries. |
+<!-- kafka-topology:end -->
+
 `compose.yml`'s topic-provisioning step (`scripts/provision-kafka-topics.sh`) pins an explicit `retention.ms` on
 every topic instead of leaving it at the broker default, matching its class: `game.events` and `timeline.events`
 (domain replay window, 7 days), `game.commands` (transient commands, 1 day), and `game.dlq` (extended dead-letter,
 30 days — long enough to investigate a parked poison message). The script re-applies retention on every run, so a
-topic that already exists with a different value is reconciled rather than left as-is.
+topic that already exists with a different value is reconciled rather than left as-is. CI validates this table against
+the provisioner in both directions, so adding or removing a topic requires updating both declarations.
 
 Local development stays plaintext with no broker authentication or authorization by design — that friction has no
 place in an inner dev loop. `compose.secure.yml` is a wholly separate, standalone Compose stack (own broker, own
