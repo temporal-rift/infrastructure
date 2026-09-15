@@ -74,14 +74,14 @@ class TopicAccessControlIT {
             consumer.subscribe(List.of("game.events"));
             var seen = new ArrayList<String>();
             await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
-                consumer.poll(Duration.ofMillis(500)).forEach(record -> seen.add(record.value()));
+                consumer.poll(Duration.ofMillis(500)).forEach(polled -> seen.add(polled.value()));
                 assertThat(seen).contains(message);
             });
         }
     }
 
     @Test
-    void producingOutsideGrantedTopicSetIsDeniedAndLogged() throws Exception {
+    void producingOutsideGrantedTopicSetIsDeniedAndLogged() {
         // read-service has no producer anywhere in its own code, and no produce grant on any topic.
         try (var producer = producerFor(SecureKafka.readServiceProperties())) {
             var future = producer.send(new ProducerRecord<>("game.events", "key", "should-be-denied"));
@@ -109,8 +109,8 @@ class TopicAccessControlIT {
         consumerProperties.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         try (var consumer = consumerFor(consumerProperties)) {
             consumer.subscribe(List.of("game.commands"));
-            assertThatThrownBy(() -> consumer.poll(Duration.ofSeconds(10)))
-                    .isInstanceOf(TopicAuthorizationException.class);
+            var pollTimeout = Duration.ofSeconds(10);
+            assertThatThrownBy(() -> consumer.poll(pollTimeout)).isInstanceOf(TopicAuthorizationException.class);
         }
     }
 
