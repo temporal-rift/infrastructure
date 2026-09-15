@@ -90,6 +90,12 @@ jobs:
           path: infrastructure
           persist-credentials: false
 
+      - name: Validate Kafka topology declarations
+        working-directory: infrastructure
+        run: |
+          bash scripts/test-verify-kafka-topology.sh
+          bash scripts/verify-kafka-topology.sh
+
       - name: Check out game-service
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

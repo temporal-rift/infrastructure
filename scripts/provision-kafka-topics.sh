@@ -16,12 +16,14 @@ if [ -n "${2:-}" ]; then
   command_config=(--command-config "$2")
 fi
 
+# kafka-topology:start
 declare -A retention_ms=(
   [game.events]=604800000
   [timeline.events]=604800000
   [game.commands]=86400000
   [game.dlq]=2592000000
 )
+# kafka-topology:end
 
 for topic in "${!retention_ms[@]}"; do
   # --if-not-exists silently ignores --config on a topic that already exists, so retention is
