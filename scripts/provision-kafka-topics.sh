@@ -3,7 +3,7 @@
 # non-local authenticated topology, so retention per topic class can never drift between the
 # two. retention.ms is pinned explicitly instead of left at the broker default, matching
 # event-schema.md: domain replay window for game.events/timeline.events, short-lived for the
-# transient game.commands, extended for the dead-letter game.dlq.
+# transient game.commands, extended for source-specific dead-letter topics.
 #
 # Usage: provision-kafka-topics.sh <bootstrap-server> [command-config-file]
 # The optional command-config-file is a Kafka client properties file (e.g. SASL credentials)
@@ -21,7 +21,9 @@ declare -A retention_ms=(
   [game.events]=604800000
   [timeline.events]=604800000
   [game.commands]=86400000
-  [game.dlq]=2592000000
+  [game.events.dlq]=2592000000
+  [timeline.events.dlq]=2592000000
+  [game.commands.dlq]=2592000000
 )
 # kafka-topology:end
 

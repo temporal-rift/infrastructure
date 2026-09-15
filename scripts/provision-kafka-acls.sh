@@ -4,8 +4,9 @@
 # timeline-service, and read-service — not the aspirational tables in event-schema.md). No
 # principal receives a wildcard grant, and no principal receives an operation it doesn't perform:
 #
-#   game-service      produce game.events, game.dlq   consume timeline.events, game.commands
-#   timeline-service   produce timeline.events         consume game.events
+#   game-service      produce game.events, timeline.events.dlq, game.commands.dlq
+#                     consume timeline.events, game.commands
+#   timeline-service   produce timeline.events, game.events.dlq   consume game.events
 #   read-service       (no producer anywhere in its code)  consume game.events, timeline.events
 #
 # Consumer group ids are namespaced per service (game-service.*, timeline-service.*,
@@ -22,12 +23,14 @@ grant() {
 }
 
 grant game-service --operation Write --operation Describe --topic game.events
-grant game-service --operation Write --operation Describe --topic game.dlq
+grant game-service --operation Write --operation Describe --topic timeline.events.dlq
+grant game-service --operation Write --operation Describe --topic game.commands.dlq
 grant game-service --operation Read --operation Describe --topic timeline.events
 grant game-service --operation Read --operation Describe --topic game.commands
 grant game-service --operation Read --group game-service. --resource-pattern-type prefixed
 
 grant timeline-service --operation Write --operation Describe --topic timeline.events
+grant timeline-service --operation Write --operation Describe --topic game.events.dlq
 grant timeline-service --operation Read --operation Describe --topic game.events
 grant timeline-service --operation Read --group timeline-service. --resource-pattern-type prefixed
 
