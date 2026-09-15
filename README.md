@@ -40,7 +40,7 @@ consumer groups its own code actually uses — no wildcards. It never runs as pa
 up on its own to inspect it:
 
 ```bash
-docker compose -f infrastructure/compose.secure.yml up --build --wait
+docker compose -f compose.secure.yml up --build --wait
 ```
 
 The `security-e2e` Maven profile (`mvn verify -Psecurity-e2e`, from this repository) boots that stack and proves
