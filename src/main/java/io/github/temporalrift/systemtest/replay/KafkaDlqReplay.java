@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -33,7 +35,14 @@ public final class KafkaDlqReplay {
     private static final Set<String> REPLAYABLE_SOURCE_TOPICS =
             Set.of("game.events", "timeline.events", "game.commands");
     private static final String DEAD_LETTER_HEADER_PREFIX = "kafka_dlt-";
+    private static final String OPTION_BOOTSTRAP_SERVER = "bootstrap-server";
+    private static final String OPTION_SOURCE_TOPIC = "source-topic";
+    private static final String OPTION_GAME_ID = "game-id";
+    private static final String OPTION_COMMAND_CONFIG = "command-config";
+    private static final Set<String> SUPPORTED_OPTIONS =
+            Set.of(OPTION_BOOTSTRAP_SERVER, OPTION_SOURCE_TOPIC, OPTION_GAME_ID, OPTION_COMMAND_CONFIG);
     private static final Duration POLL_TIMEOUT = Duration.ofSeconds(1);
+    private static final Logger LOGGER = Logger.getLogger(KafkaDlqReplay.class.getName());
 
     private KafkaDlqReplay() {}
 
@@ -41,8 +50,9 @@ public final class KafkaDlqReplay {
         var arguments = Arguments.parse(args);
         var properties = arguments.connectionProperties();
         var replayed = replay(properties, arguments.sourceTopic(), arguments.gameId());
-        System.out.printf(
-                "Replayed %d record(s) for game %s to %s.%n", replayed, arguments.gameId(), arguments.sourceTopic());
+        LOGGER.log(Level.INFO, "Replayed {0} record(s) for game {1} to {2}.", new Object[] {
+            replayed, arguments.gameId(), arguments.sourceTopic()
+        });
     }
 
     /**
@@ -80,11 +90,11 @@ public final class KafkaDlqReplay {
         }
     }
 
-    static boolean belongsToGame(ConsumerRecord<byte[], byte[]> record, String gameId) {
-        if (gameId.equals(utf8(record.key()))) {
+    static boolean belongsToGame(ConsumerRecord<byte[], byte[]> consumerRecord, String gameId) {
+        if (gameId.equals(utf8(consumerRecord.key()))) {
             return true;
         }
-        for (var header : record.headers().headers("gameId")) {
+        for (var header : consumerRecord.headers().headers("gameId")) {
             if (gameId.equals(utf8(header.value()))) {
                 return true;
             }
@@ -114,15 +124,15 @@ public final class KafkaDlqReplay {
         var endOffset = consumer.endOffsets(List.of(deadLetterPartition)).get(deadLetterPartition);
         var deliveries = new ArrayList<java.util.concurrent.Future<?>>();
         while (consumer.position(deadLetterPartition) < endOffset) {
-            for (var record : consumer.poll(POLL_TIMEOUT).records(deadLetterPartition)) {
-                if (belongsToGame(record, gameId)) {
+            for (var parkedRecord : consumer.poll(POLL_TIMEOUT).records(deadLetterPartition)) {
+                if (belongsToGame(parkedRecord, gameId)) {
                     deliveries.add(producer.send(new ProducerRecord<>(
                             sourceTopic,
-                            record.partition(),
-                            record.timestamp(),
-                            record.key(),
-                            record.value(),
-                            applicationHeaders(record.headers()))));
+                            parkedRecord.partition(),
+                            parkedRecord.timestamp(),
+                            parkedRecord.key(),
+                            parkedRecord.value(),
+                            applicationHeaders(parkedRecord.headers()))));
                 }
             }
         }
@@ -152,23 +162,21 @@ public final class KafkaDlqReplay {
                     throw new IllegalArgumentException("Arguments must be supplied as --name value pairs.");
                 }
                 var option = args[index].substring(2);
-                if (!Set.of("bootstrap-server", "source-topic", "game-id", "command-config")
-                                .contains(option)
-                        || values.put(option, args[index + 1]) != null) {
+                if (!SUPPORTED_OPTIONS.contains(option) || values.put(option, args[index + 1]) != null) {
                     throw new IllegalArgumentException("Unsupported or duplicate option: --" + option);
                 }
             }
-            for (var required : List.of("bootstrap-server", "source-topic", "game-id")) {
+            for (var required : List.of(OPTION_BOOTSTRAP_SERVER, OPTION_SOURCE_TOPIC, OPTION_GAME_ID)) {
                 if (!values.containsKey(required) || values.get(required).isBlank()) {
                     throw new IllegalArgumentException("Missing required option: --" + required);
                 }
             }
-            validateSourceTopic(values.get("source-topic"));
+            validateSourceTopic(values.get(OPTION_SOURCE_TOPIC));
             return new Arguments(
-                    values.get("bootstrap-server"),
-                    values.get("source-topic"),
-                    values.get("game-id"),
-                    values.get("command-config"));
+                    values.get(OPTION_BOOTSTRAP_SERVER),
+                    values.get(OPTION_SOURCE_TOPIC),
+                    values.get(OPTION_GAME_ID),
+                    values.get(OPTION_COMMAND_CONFIG));
         }
 
         Properties connectionProperties() throws java.io.IOException {
