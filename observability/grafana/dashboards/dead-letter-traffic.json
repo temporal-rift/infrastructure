@@ -1,0 +1,43 @@
+{
+  "uid": "temporal-rift-dead-letter-traffic",
+  "title": "Dead-letter traffic",
+  "tags": ["temporal-rift", "kafka"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "15s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Dead-letter topic offset",
+      "description": "kafka_topic_partition_current_offset for game.events.dlq, timeline.events.dlq, and game.commands.dlq. Any increase means a record was parked. Alerts on KafkaDeadLetterTrafficDetected (see observability/vmalert/rules.yml).",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "kafka_topic_partition_current_offset{topic=~\".+\\\\.dlq\"}",
+          "legendFormat": "{{topic}} / {{partition}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Dead-letter records parked (5m rate)",
+      "description": "Rate of increase of each dead-letter topic's offset over a 5-minute window.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(kafka_topic_partition_current_offset{topic=~\".+\\\\.dlq\"}[5m])",
+          "legendFormat": "{{topic}} / {{partition}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}

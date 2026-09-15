@@ -1,0 +1,80 @@
+# Deterministic, timing-independent proof that the two alert rules in rules.yml fire exactly under their
+# documented conditions, run with `vmalert-tool unittest --files=rules-test.yml` (see
+# scripts/verify-alert-rules.sh). Synthetic fixtures, not a live Kafka broker -- the dead-letter path is
+# additionally proven against a real broker by the E2E suite (see TemporalRiftSystemIT).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 15s
+
+tests:
+  - name: consumer lag past threshold fires, naming the group and partition
+    interval: 15s
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="timeline-service.game-events",topic="game.events",partition="0"}'
+        values: "0 0 0 1500 1500 1500 1500 1500"
+    alert_rule_test:
+      - eval_time: 45s
+        groupname: consumer-lag
+        alertname: KafkaConsumerGroupLagHigh
+        exp_alerts: []
+      - eval_time: 1m45s
+        groupname: consumer-lag
+        alertname: KafkaConsumerGroupLagHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              consumergroup: timeline-service.game-events
+              topic: game.events
+              partition: "0"
+            exp_annotations:
+              summary: "Consumer group timeline-service.game-events is lagging on game.events/0"
+              description: >-
+                Consumer group timeline-service.game-events has 1500 records of lag on
+                game.events partition 0, past the configured threshold.
+
+  - name: consumer lag below threshold never fires
+    interval: 15s
+    input_series:
+      - series: 'kafka_consumergroup_lag{consumergroup="read-service.timeline-events",topic="timeline.events",partition="1"}'
+        values: "0 0 0 200 200 200 200 200"
+    alert_rule_test:
+      - eval_time: 1m45s
+        groupname: consumer-lag
+        alertname: KafkaConsumerGroupLagHigh
+        exp_alerts: []
+
+  - name: any dead-letter offset increase fires immediately
+    interval: 30s
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="game.events.dlq",partition="0"}'
+        values: "0 0 5 5 5 5"
+    alert_rule_test:
+      - eval_time: 30s
+        groupname: dead-letter-traffic
+        alertname: KafkaDeadLetterTrafficDetected
+        exp_alerts: []
+      - eval_time: 90s
+        groupname: dead-letter-traffic
+        alertname: KafkaDeadLetterTrafficDetected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              topic: game.events.dlq
+              partition: "0"
+            exp_annotations:
+              summary: "Dead-letter traffic on game.events.dlq"
+              description: >-
+                5 record(s) landed on dead-letter topic game.events.dlq partition 0 in the last 5
+                minutes.
+
+  - name: no dead-letter traffic never fires
+    interval: 30s
+    input_series:
+      - series: 'kafka_topic_partition_current_offset{topic="timeline.events.dlq",partition="0"}'
+        values: "0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 90s
+        groupname: dead-letter-traffic
+        alertname: KafkaDeadLetterTrafficDetected
+        exp_alerts: []

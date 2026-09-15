@@ -1,0 +1,27 @@
+{
+  "uid": "temporal-rift-sweep-recoveries",
+  "title": "Sweep recoveries",
+  "tags": ["temporal-rift", "kafka"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "15s",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Era-saga sweep recoveries",
+      "description": "game_session_era_saga_scores_updated_recovery_total. No data until game-service exposes /actuator/prometheus -- see game-service#200 and infrastructure#37's Cross-Repo Dependencies.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "game_session_era_saga_scores_updated_recovery_total",
+          "legendFormat": "game-service"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    }
+  ]
+}
