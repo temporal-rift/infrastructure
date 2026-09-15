@@ -229,7 +229,7 @@ These documented surfaces do not yet have a complete production path and are not
 
 - paradox-resolution action REST and paradox-resolution saga interaction
 - Weaver-chain REST endpoints
-- read-service WebSocket notification/filtering (including `BandedProbabilityPublished` fan-out/filtering — the
+- read-service WebSocket notification/filtering (including `AdjustedBandsPublished` fan-out/filtering — the
   Scan-intel scenario observes the real band directly off `timeline.events` instead, see above)
 - disconnect/reconnect initiation from the absent WebSocket notification path
 - paradox cascade and Weaver-chain accumulation as complete player journeys (the game-end scenario lets paradoxes

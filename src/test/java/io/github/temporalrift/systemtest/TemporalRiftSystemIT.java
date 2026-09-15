@@ -357,7 +357,7 @@ class TemporalRiftSystemIT {
         @Order(3)
         void sameRoundNullifyKeepsTheVictimsScanFromEverRevealing() {
             // Constructed before Round 2 closes, so its consumer group already has a confirmed partition
-            // assignment before the real BandedProbabilityPublished for Round 2 is produced. Read three steps
+            // assignment before the real AdjustedBandsPublished for Round 2 is produced. Read three steps
             // later; see closeBandProbe.
             bandProbe = new KafkaEventProbe();
 
@@ -424,7 +424,7 @@ class TemporalRiftSystemIT {
         void exactRevealedValuesAgreeWithThePublishedPublicBand() {
             var bandPublication = bandProbe
                     .awaitBandPublication(gameId, 1, Duration.ofSeconds(30))
-                    .orElseThrow(() -> new AssertionError("BandedProbabilityPublished never observed for era 1"));
+                    .orElseThrow(() -> new AssertionError("AdjustedBandsPublished never observed for era 1"));
             for (var eventId : unstalledEventIds) {
                 var revealed = afterRoundTwo.probabilityIntelFor(eventId).orElseThrow();
                 for (var outcome : revealed.outcomes()) {

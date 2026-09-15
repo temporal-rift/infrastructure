@@ -18,12 +18,14 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Passively observes real facts published on {@code timeline.events} -- specifically
- * {@code BandedProbabilityPublished}, which read-service's notification module only ever pushes over WebSocket
- * and never persists to a REST-queryable projection (confirmed by inspecting the projection and notification
- * modules directly -- no REST surface exists for it). Kafka is a declared service-to-service boundary for this
- * black-box system-integration test (unlike a browser/client E2E, which would be scoped to REST/WebSocket only),
- * so reading the real publication here observes the canonical public-band fact the running system actually
- * produced, rather than fabricating one.
+ * {@code AdjustedBandsPublished} (timeline-service's resolution-replay band correction; the retired
+ * {@code timeline.events} republication of game-service's {@code BandedProbabilityPublished} preview under that
+ * same name was removed outright in {@code timeline-event} 3.0.0), which read-service's notification module
+ * only ever pushes over WebSocket and never persists to a REST-queryable projection (confirmed by inspecting the
+ * projection and notification modules directly -- no REST surface exists for it). Kafka is a declared
+ * service-to-service boundary for this black-box system-integration test (unlike a browser/client E2E, which
+ * would be scoped to REST/WebSocket only), so reading the real publication here observes the canonical
+ * public-band fact the running system actually produced, rather than fabricating one.
  *
  * <p>One instance owns one consumer group for its whole lifecycle -- construct it once per scenario (before the
  * round whose publication it needs to observe closes, so partition assignment is already settled and no message
@@ -61,7 +63,7 @@ final class KafkaEventProbe implements AutoCloseable {
     }
 
     /**
-     * Polls this probe's already-assigned consumer for the real {@code BandedProbabilityPublished} publication
+     * Polls this probe's already-assigned consumer for the real {@code AdjustedBandsPublished} publication
      * of one game/era, returned whole (every event's every outcome) so the caller can compare every covered
      * event/outcome, not just one. The topic is shared across every scenario in the same e2e run, so matching
      * on {@code gameId}/{@code eraNumber} (not just {@code eventType}) is what scopes this to the caller's own
@@ -71,7 +73,7 @@ final class KafkaEventProbe implements AutoCloseable {
         var deadline = Instant.now().plus(timeout);
         while (Instant.now().isBefore(deadline)) {
             for (var consumerRecord : consumer.poll(Duration.ofMillis(500))) {
-                if (!"BandedProbabilityPublished".equals(header(consumerRecord.headers(), "eventType"))
+                if (!"AdjustedBandsPublished".equals(header(consumerRecord.headers(), "eventType"))
                         || !gameId.toString().equals(header(consumerRecord.headers(), "gameId"))) {
                     continue;
                 }
