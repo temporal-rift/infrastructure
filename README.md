@@ -11,7 +11,8 @@ docker compose -f infrastructure/compose.yml up --build
 ```
 
 The stack starts the three services, PostgreSQL (one database per service), Kafka, Kafka UI, Zipkin, VictoriaLogs, and
-a Config Server. It also creates `game.events`, `timeline.events`, `game.commands`, and `game.dlq` with three
+a Config Server. It also creates `game.events`, `timeline.events`, `game.commands`, and one source-specific
+dead-letter topic for each of them, all with three
 partitions before the services start. Each service waits for a healthy Zipkin server before starting, so its startup
 spans are retained. Set `JWT_ISSUER_URI` to a reachable issuer before using authenticated game-service or read-service
 endpoints.
@@ -31,13 +32,15 @@ endpoints.
 | `game.events` | Domain events | Carries events produced by game-service for timeline-service and read-service. |
 | `timeline.events` | Domain events | Carries resolved timeline events for game-service and read-service. |
 | `game.commands` | Commands | Carries commands for game-service. |
-| `game.dlq` | Dead-letter | Holds records that cannot be processed after retries. |
+| `game.events.dlq` | Dead-letter | Holds game event records that timeline-service could not process after retries. |
+| `timeline.events.dlq` | Dead-letter | Holds timeline event records that game-service could not process after retries. |
+| `game.commands.dlq` | Dead-letter | Holds command records that game-service could not process after retries. |
 <!-- kafka-topology:end -->
 
 `compose.yml`'s topic-provisioning step (`scripts/provision-kafka-topics.sh`) pins an explicit `retention.ms` on
 every topic instead of leaving it at the broker default, matching its class: `game.events` and `timeline.events`
-(domain replay window, 7 days), `game.commands` (transient commands, 1 day), and `game.dlq` (extended dead-letter,
-30 days — long enough to investigate a parked poison message). The script re-applies retention on every run, so a
+(domain replay window, 7 days), `game.commands` (transient commands, 1 day), and each source-specific dead-letter
+topic (30 days — long enough to investigate a parked poison message). The script re-applies retention on every run, so a
 topic that already exists with a different value is reconciled rather than left as-is. CI validates this table against
 the provisioner in both directions, so adding or removing a topic requires updating both declarations.
 
@@ -68,7 +71,7 @@ An erasure request for a player must be followed through every carrier of player
 | Carrier | How the player's data is removed |
 |---|---|
 | `game.events`, `timeline.events`, `game.commands` | Self-expiring: no action needed once the topic's retention window (see above) elapses. There is no compaction or manual tombstoning of these topics — a request that cannot wait out the retention window is not satisfiable by these topics alone. |
-| `game.dlq` | Same as above, on its own 30-day window. |
+| `game.events.dlq`, `timeline.events.dlq`, `game.commands.dlq` | Same as above, on their own 30-day window. |
 | `game-service`'s database | Durable — does not expire on its own. Delete the player's rows from every table that references their player id (lobby membership, hand/selection state, action history, score records) via that service's own migrations/tooling; do not rely on retention. |
 | `timeline-service`'s database | Durable. Its event-sourced store retains `FutureEvent` history; delete or redact rows referencing the player's id the same way. |
 | `read-service`'s database | Durable. Delete the player's projection rows (game state, game history, player-game-state) the same way. |

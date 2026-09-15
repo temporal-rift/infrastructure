@@ -39,7 +39,9 @@ class TopicAccessControlIT {
                 "game.events", "604800000",
                 "timeline.events", "604800000",
                 "game.commands", "86400000",
-                "game.dlq", "2592000000");
+                "game.events.dlq", "2592000000",
+                "timeline.events.dlq", "2592000000",
+                "game.commands.dlq", "2592000000");
 
         try (var admin = AdminClient.create(SecureKafka.adminProperties())) {
             var resources = expectedRetentionMs.keySet().stream()
@@ -78,6 +80,13 @@ class TopicAccessControlIT {
                 assertThat(seen).contains(message);
             });
         }
+    }
+
+    @Test
+    void serviceDeadLetterWriteGrantsMatchTheTopicsItOwns() throws Exception {
+        assertCanProduce(SecureKafka.timelineServiceProperties(), "game.events.dlq");
+        assertCanProduce(SecureKafka.gameServiceProperties(), "timeline.events.dlq");
+        assertCanProduce(SecureKafka.gameServiceProperties(), "game.commands.dlq");
     }
 
     @Test
@@ -127,5 +136,12 @@ class TopicAccessControlIT {
         properties.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         properties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         return new KafkaConsumer<>(properties);
+    }
+
+    private static void assertCanProduce(Properties properties, String topic) throws Exception {
+        try (var producer = producerFor(properties)) {
+            producer.send(new ProducerRecord<>(topic, "key", UUID.randomUUID().toString()))
+                    .get();
+        }
     }
 }

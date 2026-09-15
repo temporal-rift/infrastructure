@@ -2,8 +2,7 @@ name: temporal-rift-secure
 
 # Demonstrates and proves the authenticated, least-privilege-authorized broker topology intended
 # for any environment outside local development (see infrastructure#38 and
-# openspec/changes/kafka-topic-security-retention-erasure in the workspace's OpenSpec store for
-# the full rationale). This is a wholly separate, standalone stack — its own broker, its own
+# the internal design rationale). This is a wholly separate, standalone stack — its own broker, its own
 # ports, its own Compose project name — never merged into the plaintext local dev compose.yml or
 # the existing compose.e2e.yml system-e2e stack, so neither is affected by anything here.
 #
