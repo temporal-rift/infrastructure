@@ -343,3 +343,68 @@ These documented surfaces do not yet have a complete production path and are not
 
 Their existing service-local tests remain authoritative for implemented internal slices until the missing public or
 cross-service path is delivered.
+
+## Isolated browser playtest deployment
+
+`compose.playtest.yml` is an overlay over `compose.yml` that provides one reproducible, browser-reachable entry
+point for ordinary authenticated human players (Compose project `temporal-rift-playtest`). A `playtest-edge`
+gateway serves the prebuilt static browser client over HTTPS and routes same-origin API traffic to the owning
+service; direct service ports and diagnostic interfaces are unpublished from the player entry point. There is no
+new deployable domain service in this topology.
+
+| Player route | Owner |
+|---|---|
+| `GET /` (static client, SPA fallback) | `playtest-edge` |
+| `GET /api/v1/games/{gameId}/state`, `/history` | read-service (single instance) |
+| `GET /api/v1/games/{gameId}/chains` | timeline-service |
+| All other `/api/` gameplay routes (lobbies, hand selection, actions, paradox resolution, scores) | game-service |
+| `/ws/` live notifications | read-service (single instance; best-effort — authenticated polling is the authoritative recovery path) |
+
+Upstream `/actuator/*`, observability UIs, Kafka UI, and the Config Server are never proxied: they return 404
+through the player origin by construction.
+
+### Prerequisites
+
+- The three services checked out as siblings (the layout Compose's `../<service>` build contexts require).
+- A reachable OIDC issuer (all services honor `JWT_ISSUER_URI`; issuers without standard discovery additionally
+  need their `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI` wired per service).
+- A TLS certificate and key for the playtest host.
+- The built static client: from the sibling browser-client checkout, configure `VITE_API_BASE_URL` to the
+  playtest origin itself (same-origin routing), plus `VITE_OIDC_ISSUER_URL`/`VITE_OIDC_CLIENT_ID`, then run its
+  build so `../game-client/dist/` is fresh. The manifest records the client build digest alongside the backend
+  pins — rebuild the client for every deployment.
+
+### Deploy
+
+```bash
+export JWT_ISSUER_URI=https://<reachable-issuer>
+export PLAYTEST_EXTERNAL_ORIGIN=https://<playtest-host>
+export PLAYTEST_TLS_CERT=/path/to/cert.pem PLAYTEST_TLS_KEY=/path/to/key.pem
+# PLAYTEST_TIMING_PRESET=test-override only when accelerated/forced timing is intended; default is normal.
+bash scripts/write-playtest-manifest.sh
+bash scripts/verify-playtest-deployment.sh
+docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml up --build -d --scale read-service=1
+```
+
+`verify-playtest-deployment.sh` fails clearly instead of starting a misleading stack: a missing or unreachable
+issuer, a non-HTTPS origin, missing TLS inputs, an incompatible adopted contract set across the service POMs, a
+stale or missing `playtest/manifest.json` (generated per deployment, never hand-edited or committed), an
+unlabeled timing/content override, a non-single read-service replica, or any diagnostic route leaking through the
+player origin. Its fixture tests run without Docker or an issuer:
+
+```bash
+bash scripts/test-verify-playtest-deployment.sh
+```
+
+Normal games use production timing and the committed `config-server/config-repo` values. Any accelerated or
+forced timing/content override must be recorded with `PLAYTEST_TIMING_PRESET=test-override` before generating
+the manifest; an unlabeled override fails validation rather than silently becoming the normal ruleset.
+
+Initial limits are documented, not scaled past: player state synchronizes by authenticated polling against one
+read-service instance. Do not claim multi-instance socket fan-out for this deployment.
+
+Teardown removes only the task-owned project, reusing and protecting unrelated workloads:
+
+```bash
+docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml down -v --remove-orphans
+```

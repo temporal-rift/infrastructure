@@ -1,0 +1,79 @@
+name: temporal-rift-playtest
+
+# Isolated browser playtest deployment. This is an overlay over compose.yml: it adds the
+# HTTPS same-origin player entry point (playtest-edge), unpublishes direct service and
+# diagnostic ports, pins a single read-service instance, and requires an externally
+# reachable OIDC issuer. Local-dev behavior in compose.yml is untouched.
+#
+# Lifecycle (always scoped to this task-owned project; never disturbs other stacks):
+#
+#   export JWT_ISSUER_URI=https://<reachable-issuer>
+#   export PLAYTEST_EXTERNAL_ORIGIN=https://<playtest-host>
+#   export PLAYTEST_TLS_CERT=/path/to/cert.pem PLAYTEST_TLS_KEY=/path/to/key.pem
+#   bash scripts/write-playtest-manifest.sh
+#   bash scripts/verify-playtest-deployment.sh
+#   docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml up --build -d --scale read-service=1
+#   docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml down -v --remove-orphans
+#
+# Normal games use production timing. Any accelerated/forced timing must be recorded with
+# PLAYTEST_TIMING_PRESET=test-override before generating the manifest; an unlabeled
+# override fails validation instead of silently becoming the normal ruleset.
+
+services:
+  postgres:
+    ports: !override []
+
+  kafka:
+    ports: !override []
+
+  kafka-ui:
+    ports: !override []
+
+  zipkin:
+    ports: !override []
+
+  kafka-exporter:
+    ports: !override []
+
+  config-server:
+    ports: !override []
+
+  game-service:
+    ports: !override []
+    environment:
+      JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the reachable playtest OIDC issuer}"
+
+  timeline-service:
+    ports: !override []
+    environment:
+      JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the reachable playtest OIDC issuer}"
+
+  read-service:
+    ports: !override []
+    deploy:
+      replicas: 1
+    environment:
+      JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the reachable playtest OIDC issuer}"
+
+  playtest-edge:
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ../game-client/dist:/usr/share/nginx/html:ro
+      - ./playtest/nginx.conf:/etc/nginx/nginx.conf:ro
+      - "${PLAYTEST_TLS_CERT:?PLAYTEST_TLS_CERT must be set to the playtest TLS certificate file}:/etc/nginx/tls/cert.pem:ro"
+      - "${PLAYTEST_TLS_KEY:?PLAYTEST_TLS_KEY must be set to the playtest TLS key file}:/etc/nginx/tls/key.pem:ro"
+    depends_on:
+      game-service:
+        condition: service_started
+      timeline-service:
+        condition: service_started
+      read-service:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://127.0.0.1/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
