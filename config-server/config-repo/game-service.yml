@@ -50,6 +50,7 @@ game:
       - SEAL
       - CORRUPT
       - MIMIC
+      - REWEAVE
     hand-deal-forced-types: []
     scoring:
       score-deltas:
