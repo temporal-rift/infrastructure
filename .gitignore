@@ -3,3 +3,5 @@
 !.env.example
 target/
 *.iml
+# Generated per deployment; never commit an effective manifest.
+playtest/manifest.json
