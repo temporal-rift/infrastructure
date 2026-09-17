@@ -74,8 +74,10 @@ run_validator() {
     PLAYTEST_CLIENT_DIST="$root/dist" \
     PLAYTEST_MANIFEST="$manifest_file" \
     PLAYTEST_SERVICES_DIR="$root/services" \
+    PLAYTEST_CONFIG_REPO="$root/config-repo" \
+    PLAYTEST_CATALOG="$root/catalog.yml" \
     PLAYTEST_TIMING_PRESET="$timing" \
-    PLAYTEST_SKIP_ISSUER_REACHABILITY=1 \
+    PLAYTEST_SKIP_ISSUER_REACHABILITY="${PLAYTEST_SKIP_ISSUER_REACHABILITY:-1}" \
     JWT_ISSUER_URI="$jwt" \
     PLAYTEST_EXTERNAL_ORIGIN="$origin" \
     PLAYTEST_TLS_CERT="$root/cert.pem" \
@@ -117,6 +119,19 @@ FIX_ORIGIN="http://play.example" assert_failure_contains "must be https" \
 assert_failure_contains "PLAYTEST_TLS_KEY file not found" \
   run_validator "$valid_root" PLAYTEST_TLS_KEY="$valid_root/absent.pem"
 
+# Unreachable issuer discovery fails clearly.
+PLAYTEST_SKIP_ISSUER_REACHABILITY=0 FIX_JWT="http://127.0.0.1:9/unreachable" \
+  assert_failure_contains "not reachable" \
+  run_validator "$valid_root"
+
+# Non-single read-service replicas fail clearly.
+replica_root="$fixtures_dir/replica"
+setup_valid_deployment "$replica_root"
+sed 's#replicas: 1#replicas: 2#' \
+  "$repo_root/compose.playtest.yml" > "$replica_root/compose.yml"
+PLAYTEST_COMPOSE_FILE="$replica_root/compose.yml" assert_failure_contains "single replica" \
+  run_validator "$replica_root"
+
 # Incompatible adopted contract set fails clearly.
 incompatible_root="$fixtures_dir/incompatible"
 setup_valid_deployment "$incompatible_root"
@@ -132,6 +147,26 @@ sed -i 's#<action-api.version>3.0.3</action-api.version>#<action-api.version>3.0
   "$stale_root/services/game-service/pom.xml"
 assert_failure_contains "does not match the deployed POM pin" \
   run_validator "$stale_root"
+
+# Manifest generated for a different issuer fails clearly.
+issuer_root="$fixtures_dir/issuer"
+setup_valid_deployment "$issuer_root"
+PLAYTEST_SERVICES_DIR="$issuer_root/services" \
+  PLAYTEST_CONFIG_REPO="$issuer_root/config-repo" \
+  PLAYTEST_CATALOG="$issuer_root/catalog.yml" \
+  PLAYTEST_CLIENT_DIST="$issuer_root/dist" \
+  PLAYTEST_TIMING_PRESET="normal" \
+  JWT_ISSUER_URI="https://other-issuer.example" \
+  bash "$writer" "$issuer_root/manifest.json" >/dev/null
+assert_failure_contains "does not match JWT_ISSUER_URI" \
+  run_validator "$issuer_root"
+
+# Rules/content drift after manifest generation fails clearly.
+drift_root="$fixtures_dir/drift"
+setup_valid_deployment "$drift_root"
+echo "game: {drifted: true}" >> "$drift_root/config-repo/game-service.yml"
+assert_failure_contains "digest does not match" \
+  run_validator "$drift_root"
 
 # Silent test overrides fail clearly.
 override_root="$fixtures_dir/override"

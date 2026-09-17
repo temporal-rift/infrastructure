@@ -388,7 +388,7 @@ docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml 
 
 `verify-playtest-deployment.sh` fails clearly instead of starting a misleading stack: a missing or unreachable
 issuer, a non-HTTPS origin, missing TLS inputs, an incompatible adopted contract set across the service POMs, a
-stale or missing `playtest/manifest.json` (generated per deployment, never hand-edited or committed), an
+stale or missing `playtest/manifest.json` (generated per deployment, never hand-edited or committed — the recorded issuer, timing preset, contract pins, and rules/content/client digests are all re-checked, so any drift since generation fails), an
 unlabeled timing/content override, a non-single read-service replica, or any diagnostic route leaking through the
 player origin. Its fixture tests run without Docker or an issuer:
 

@@ -93,6 +93,22 @@ done
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 issuer="${JWT_ISSUER_URI:-unconfigured}"
 
+# Every digest input must exist up front: a manifest that silently records
+# "missing" for a rules, catalog, or client input would claim a pinned
+# deployment it never actually saw.
+for required_input in \
+  "$config_repo/application.yml" \
+  "$config_repo/game-service.yml" \
+  "$config_repo/timeline-service.yml" \
+  "$config_repo/read-service.yml" \
+  "$catalog_file" \
+  "$client_dist/index.html"; do
+  if [[ ! -f "$required_input" ]]; then
+    echo "Cannot write manifest: required input not found: $required_input" >&2
+    exit 1
+  fi
+done
+
 mkdir -p "$(dirname "$output")"
 {
   printf '{\n'
