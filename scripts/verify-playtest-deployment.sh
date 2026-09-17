@@ -95,7 +95,7 @@ for service in game-service timeline-service read-service; do
     || fail "$compose_file must unpublish the direct $service host ports (ports: !override []) so players use only the edge entry point."
 done
 
-service_block "read-service" "$compose_file" | grep -q "replicas: 1" \
+service_block "read-service" "$compose_file" | grep -qE "replicas:[[:space:]]*1([[:space:]]*(#.*)?)?$" \
   || fail "$compose_file must pin read-service to a single replica: the initial topology supports authenticated polling without multi-instance socket fan-out."
 
 grep -q 'JWT_ISSUER_URI:?' "$compose_file" \
@@ -130,8 +130,8 @@ grep -q "server timeline-service:8080" "$nginx_conf" \
 if grep -q -E 'location +\^~ +/api/' "$nginx_conf"; then
   fail "$nginx_conf must not use ^~ on the generic /api/ route: it would shadow the read-service and timeline-service regex routes."
 fi
-state_line="$(grep -n "games/.*state" "$nginx_conf" | head -n1 | cut -d: -f1)"
-generic_line="$(grep -n -E 'location +(\^~ +)?/api/' "$nginx_conf" | head -n1 | cut -d: -f1)"
+state_line="$(grep -n "games/.*state" "$nginx_conf" | head -n1 | cut -d: -f1 || true)"
+generic_line="$(grep -n -E 'location +(\^~ +)?/api/' "$nginx_conf" | head -n1 | cut -d: -f1 || true)"
 [[ -n "$state_line" && -n "$generic_line" && "$state_line" -lt "$generic_line" ]] \
   || fail "$nginx_conf must route player state reads to read-service ahead of the generic /api/ gameplay route."
 
@@ -193,6 +193,37 @@ manifest_value() {
 
 [[ "$(manifest_value "timingPreset")" == "$timing_preset" ]] \
   || fail "manifest timingPreset '$(manifest_value "timingPreset")' does not match PLAYTEST_TIMING_PRESET='$timing_preset': regenerate the manifest for this deployment."
+[[ "$(manifest_value "issuer")" == "$JWT_ISSUER_URI" ]] \
+  || fail "manifest issuer '$(manifest_value "issuer")' does not match JWT_ISSUER_URI='$JWT_ISSUER_URI': regenerate the manifest for this deployment."
+
+# The recorded rules/content digests are re-derived from the same inputs the
+# writer uses, so a config, catalog, or client change after manifest generation
+# fails here instead of deploying under a stale attribution.
+config_repo="${PLAYTEST_CONFIG_REPO:-$repo_root/config-server/config-repo}"
+catalog_file="${PLAYTEST_CATALOG:-$services_dir/game-service/src/main/resources/future-events.yml}"
+
+recomputed_digest() {
+  local path="$1"
+  if [[ -f "$path" ]]; then
+    sha256sum "$path" | awk '{print $1}'
+  else
+    echo "missing"
+  fi
+}
+
+check_digest_matches() {
+  local key="$1"
+  local path="$2"
+  [[ "$(manifest_value "$key")" == "$(recomputed_digest "$path")" ]] \
+    || fail "manifest $key digest does not match $path: regenerate the manifest for this deployment."
+}
+
+check_digest_matches "application.yml" "$config_repo/application.yml"
+check_digest_matches "game-service.yml" "$config_repo/game-service.yml"
+check_digest_matches "timeline-service.yml" "$config_repo/timeline-service.yml"
+check_digest_matches "read-service.yml" "$config_repo/read-service.yml"
+check_digest_matches "future-events.yml" "$catalog_file"
+check_digest_matches "clientDistDigest" "$client_dist/index.html"
 for pin in session-event action-event timeline-event scoring-event session-api action-api scoring-api projection-api chains-api; do
   case "$pin" in
     session-event|action-event|timeline-event|scoring-event|session-api|action-api|scoring-api)
