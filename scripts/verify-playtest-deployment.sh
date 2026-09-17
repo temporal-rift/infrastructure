@@ -17,6 +17,8 @@
 #   PLAYTEST_COMPOSE_FILE             Override for compose.playtest.yml.
 #   PLAYTEST_NGINX_CONF               Override for playtest/nginx.conf.
 #   PLAYTEST_CLIENT_DIST              Override for the built static client directory.
+#   PLAYTEST_CONFIG_REPO              Override for the served config-repo directory.
+#   PLAYTEST_CATALOG                  Override for the served event-catalog file.
 #   PLAYTEST_MANIFEST                 Override for playtest/manifest.json.
 #   PLAYTEST_SERVICES_DIR             Directory holding the game-service,
 #                                     timeline-service and read-service checkouts.
