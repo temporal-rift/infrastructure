@@ -26,6 +26,9 @@
              anything, so it's excluded from the metric entirely rather than chased with test-profile
              gymnastics; Sonar still runs for code smells/bugs/security. -->
         <sonar.coverage.exclusions>**/*</sonar.coverage.exclusions>
+        <!-- Not managed by temporal-rift-bom; pinned directly and bumped independently of the
+             shared BOM like the other test-only tooling versions in this module. -->
+        <playwright.version>1.49.0</playwright.version>
     </properties>
 
     <dependencies>
@@ -52,6 +55,14 @@
         <dependency>
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
+        </dependency>
+        <dependency>
+            <!-- Real browser automation for the browser-e2e profile only; every other profile and
+                 the default build never touch it. -->
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>${playwright.version}</version>
+            <scope>test</scope>
         </dependency>
     </dependencies>
 
@@ -321,6 +332,115 @@
                                     <includes>
                                         <include>**/security/*IT.java</include>
                                     </includes>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <!-- Real-browser evidence (infrastructure#47) that a complete normal game is playable
+                 end to end through the deployed client, with isolated separately authenticated
+                 player sessions — the browser counterpart of the `e2e` profile's command-only
+                 proof. Boots the isolated playtest deployment (compose.playtest.yml) plus a
+                 dedicated interactive mock OIDC issuer under its own project name,
+                 temporal-rift-browser-e2e, so it never disturbs `temporal-rift-e2e`,
+                 `temporal-rift-playtest`, or a developer's own dev stack. See design.md for why a
+                 genuinely interactive issuer (not e2e's static `e2e-auth`) is required. -->
+            <id>browser-e2e</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>${maven.exec.version}</version>
+                        <executions>
+                            <execution>
+                                <!-- Bound after test-compile so the test classpath (carrying the
+                                     Playwright dependency) is available to its own install CLI. -->
+                                <id>install-playwright-browsers</id>
+                                <phase>process-test-classes</phase>
+                                <goals>
+                                    <goal>java</goal>
+                                </goals>
+                                <configuration>
+                                    <mainClass>com.microsoft.playwright.CLI</mainClass>
+                                    <classpathScope>test</classpathScope>
+                                    <arguments>
+                                        <argument>install</argument>
+                                        <argument>chromium</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>start-browser-e2e-stack</id>
+                                <phase>pre-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>scripts/start-browser-e2e-stack.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <!-- Must be declared before stop-browser-e2e-stack: both bind to
+                                     post-integration-test, and same-phase executions of one plugin
+                                     run in POM declaration order. Captures diagnostics while the
+                                     stack still exists, matching the e2e/security-e2e profiles'
+                                     precedent. -->
+                                <id>capture-browser-e2e-diagnostics</id>
+                                <phase>post-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>sh</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>src/test/resources/capture-browser-e2e-diagnostics.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>stop-browser-e2e-stack</id>
+                                <phase>post-integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <workingDirectory>${project.basedir}</workingDirectory>
+                                    <arguments>
+                                        <argument>scripts/stop-browser-e2e-stack.sh</argument>
+                                    </arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                                <configuration>
+                                    <includes>
+                                        <include>**/browser/*IT.java</include>
+                                    </includes>
+                                    <systemPropertyVariables>
+                                        <!-- Playwright traces per scenario, bundled by
+                                             capture-browser-e2e-diagnostics.sh on failure. -->
+                                        <browserE2e.tracesDir>${project.basedir}/target/browser-e2e-traces</browserE2e.tracesDir>
+                                    </systemPropertyVariables>
                                 </configuration>
                             </execution>
                         </executions>
