@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Fixture tests for src/test/resources/capture-browser-e2e-diagnostics.sh's credential-redaction
+# check: one clean bundle that must pass, one poisoned bundle per credential shape that must fail
+# the capture step rather than silently publish it. Runs without Docker, a browser, or a real
+# Compose project (BROWSER_E2E_SKIP_DOCKER=1). Mirrors the style of test-verify-playtest-deployment.sh.
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+capture_script="$repo_root/src/test/resources/capture-browser-e2e-diagnostics.sh"
+
+fixtures_dir="$(mktemp -d)"
+trap 'rm -rf "$fixtures_dir"' EXIT
+
+run_capture() {
+  local root="$1"
+  BROWSER_E2E_SKIP_DOCKER=1 \
+    BROWSER_E2E_DIAGNOSTICS_DIR="$root/out" \
+    BROWSER_E2E_TRACES_DIR="$root/traces" \
+    BROWSER_E2E_MANIFEST="$root/manifest.json" \
+    sh "$capture_script"
+}
+
+failures=0
+expect_pass() {
+  local description="$1"
+  shift
+  if "$@"; then
+    echo "PASS: $description"
+  else
+    echo "FAIL: $description (expected success, got failure)"
+    failures=$((failures + 1))
+  fi
+}
+
+expect_fail() {
+  local description="$1"
+  shift
+  if "$@"; then
+    echo "FAIL: $description (expected failure, capture succeeded)"
+    failures=$((failures + 1))
+  else
+    echo "PASS: $description"
+  fi
+}
+
+# --- A clean bundle must pass and be left in place for upload. ---
+clean_root="$fixtures_dir/clean"
+mkdir -p "$clean_root/traces"
+echo '{"ok":true}' > "$clean_root/manifest.json"
+echo "trace summary: 3 scenarios, 0 failures" > "$clean_root/traces/summary.txt"
+expect_pass "a clean diagnostics bundle is published" run_capture "$clean_root"
+[ -f "$clean_root/out/playwright-traces/summary.txt" ] || { echo "FAIL: clean bundle did not copy the traces directory"; failures=$((failures + 1)); }
+
+# --- A bearer token anywhere in a captured file must fail the capture step. ---
+token_root="$fixtures_dir/token"
+mkdir -p "$token_root/traces"
+echo '{"ok":true}' > "$token_root/manifest.json"
+echo "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz.signature" > "$token_root/traces/leak.txt"
+expect_fail "a bundle containing a bearer token is refused" run_capture "$token_root"
+
+# --- A PEM private key anywhere in a captured file must fail the capture step. ---
+key_root="$fixtures_dir/key"
+mkdir -p "$key_root/traces"
+echo '{"ok":true}' > "$key_root/manifest.json"
+printf -- '-----BEGIN PRIVATE KEY-----\nMIIBVgIBADANBgkqhkiG9w0BAQEFAASCAT8wggE7AgEAAkEA\n-----END PRIVATE KEY-----\n' \
+  > "$key_root/traces/leak.txt"
+expect_fail "a bundle containing a private key is refused" run_capture "$key_root"
+
+if [ "$failures" -gt 0 ]; then
+  echo "$failures fixture check(s) failed."
+  exit 1
+fi
+echo "All capture-browser-e2e-diagnostics fixture checks passed."

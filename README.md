@@ -408,3 +408,49 @@ Teardown removes only the task-owned project, reusing and protecting unrelated w
 ```bash
 docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml down -v --remove-orphans
 ```
+
+## Browser end-to-end verification
+
+The command-only system E2E harness above proves cross-service behavior through direct HTTP commands; it never
+proves a human can actually complete a normal game through the real, deployed browser client with a genuinely
+separate authenticated session per player. The browser-e2e Maven profile (`temporal-rift-browser-e2e` Compose
+project) drives the isolated playtest deployment above with real, isolated Playwright browser contexts instead —
+one per player, each performing its own OIDC login — under accelerated, explicitly labeled test-override timing.
+
+Covered flows:
+
+| Flow | What is proven |
+|---|---|
+| Full lifecycle | Three isolated browser contexts sign in, create/join/start a game, keep five of seven offered cards, submit all three action rounds (including any triggered paradox resolution), and reach authoritative terminal results — entirely through the rendered client. |
+| Every faction's normal path | A five-player game (one seat per faction) exercises at least one ordinary action, and a faction special when the game makes one available, for every faction. |
+| Private-view isolation | Every context's captured network traffic is searched for every other player's own dealt hand; none may ever appear in a context that does not own it. |
+| Reload and round-timeout recovery | A player's accepted round decision survives a page reload without a duplicate submission; a round a player never responds to still closes on its accelerated timeout without deadlocking the game. |
+| CI timing provenance | The deployment's effective manifest is asserted to record this suite's accelerated timing as `test-override`, never as the normal-play ruleset. |
+
+Explicitly excluded: human-paced (production-timing) verification, which remains a manually facilitated playtest
+activity, not something this suite's accelerated timing can stand in for; and the same flows this repository's
+system-e2e harness already documents as lacking a complete production path.
+
+### Prerequisites
+
+- Everything `compose.playtest.yml` requires (see above), plus a sibling `game-client` checkout with Node
+  available — this suite builds its static bundle itself against its own deployment, so no pre-built `dist/` is
+  needed beforehand.
+- `docker`, `openssl`, and (on Linux) passwordless `sudo` to add a one-line hosts-file alias its interactive mock
+  OIDC issuer needs — see `compose.browser-e2e.yml` for why a genuinely interactive issuer, unlike the command-only
+  harness's static `e2e-auth`, is required, and why the alias must resolve identically on the host and inside the
+  Compose network.
+
+### Run
+
+```bash
+mvn verify -Pbrowser-e2e
+```
+
+This installs Playwright's Chromium browser, builds the sibling `game-client` bundle, brings up the isolated
+deployment under Compose project `temporal-rift-browser-e2e` (distinct from `temporal-rift-e2e` and
+`temporal-rift-playtest`, so none of the three can disturb another or a developer's own dev stack), runs the
+suite, and tears down only its own project. `.github/workflows/browser-e2e.yml` runs the same command in CI,
+checking out `game-client` alongside the three services the way `system-e2e.yml` already does for those three, and
+uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace) on
+failure only — mechanically checked to never contain a bearer token or signing key before it is written.

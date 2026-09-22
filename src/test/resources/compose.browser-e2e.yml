@@ -1,0 +1,80 @@
+name: temporal-rift-browser-e2e
+
+# Isolated real-browser deployment for the browser-e2e Maven profile (infrastructure#47). This is
+# a second overlay stacked on top of compose.playtest.yml (`-f compose.yml -f compose.playtest.yml
+# -f src/test/resources/compose.browser-e2e.yml`), reusing that overlay's HTTPS same-origin edge,
+# unpublished direct-service ports and single-read-service-instance topology unchanged. It adds
+# only what real, isolated browser-context logins and CI-bounded timing require:
+#
+# - browser-e2e-auth: a genuinely interactive OIDC test issuer (github.com/navikt/mock-oauth2-server),
+#   unlike src/test/resources/compose.e2e.yml's `e2e-auth`, which is a static JWK host with no
+#   authorization endpoint or login page — it cannot serve real browser redirect logins at all.
+#   mock-oauth2-server derives each issued token's `iss` claim from the Host header the request
+#   actually arrived on, and Spring's issuer-uri-based JwtDecoder (what compose.playtest.yml already
+#   configures for every service, no separate JWK_SET_URI) rejects a token whose `iss` does not
+#   exactly equal the configured JWT_ISSUER_URI string. Container-to-container traffic on this
+#   Compose network always reaches this service at its real listening port, 8080 — so the *host*
+#   side (the Playwright browser doing the actual login redirect, and this suite's own scripts
+#   probing discovery/JWKS) must reach the identical "browser-e2e-auth:8080" address too, not a
+#   remapped host port, or the two sides would mint/validate against different issuer strings.
+#   scripts/start-browser-e2e-stack.sh maps the `browser-e2e-auth` hostname to 127.0.0.1 in the
+#   host's own hosts file and publishes this container's port unchanged (8080:8080) to make that
+#   possible. Only this dedicated suite's own host port 8080 is at stake; compose.yml's local dev
+#   game-service (also normally 8080) is unaffected unless both stacks run on the same host at once
+#   — documented in README.md as a known limitation of the underlying mock issuer, not of Compose.
+# - Accelerated, explicitly-labeled round/selection/paradox timers on game-service and
+#   timeline-service, scoped to this project only — never compose.playtest.yml's own defaults,
+#   which stay at normal-play production timing for a real facilitated playtest.
+#
+# Lifecycle is entirely owned by the `browser-e2e` Maven profile (pom.xml); nothing here is meant
+# to be started by hand outside that profile.
+
+services:
+  browser-e2e-auth:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    environment:
+      JSON_CONFIG: >-
+        {"interactiveLogin":true,"httpServer":"NettyWrapper",
+         "tokenCallbacks":[{"issuerId":"default","tokenExpiry":3600,
+           "requestMappings":[{"requestParam":"username","match":"*","claims":{"claimsToRequest":["sub"]}}]}]}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/default/.well-known/openid-configuration"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  game-service:
+    depends_on:
+      browser-e2e-auth:
+        condition: service_healthy
+    environment:
+      # Bounded, explicitly labeled acceleration for this suite only — real playtests never set
+      # this. Matches src/test/resources/compose.e2e.yml's precedent for shortening the same timers.
+      SPRING_APPLICATION_JSON: >-
+        {"game":{"rules":{"action-round-timer-seconds":{"3":15,"4":15,"5":15},
+          "hand-selection-timer-seconds":{"3":15,"4":15,"5":15}}}}
+
+  timeline-service:
+    depends_on:
+      browser-e2e-auth:
+        condition: service_healthy
+    environment:
+      SPRING_APPLICATION_JSON: >-
+        {"game":{"rules":{"paradox-resolution-timer-seconds":15}}}
+
+  read-service:
+    depends_on:
+      browser-e2e-auth:
+        condition: service_healthy
+
+  playtest-edge:
+    # Distinct from compose.playtest.yml's default 80/443 so this suite can run alongside a real
+    # local playtest deployment on the same machine without a host-port collision.
+    ports: !override
+      - "20080:80"
+      - "20443:443"
+    depends_on:
+      browser-e2e-auth:
+        condition: service_healthy

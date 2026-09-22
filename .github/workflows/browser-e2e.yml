@@ -1,0 +1,175 @@
+name: Browser E2E
+
+# Runs the real-browser deployed-play proof (`mvn verify -Pbrowser-e2e`, infrastructure#47): isolated,
+# separately authenticated Playwright browser contexts driving the actual game-client bundle against
+# the isolated playtest deployment topology (infrastructure#46), under accelerated, explicitly
+# labeled test-override timing. Independent of system-e2e.yml (its own Compose project,
+# temporal-rift-browser-e2e) and of security-e2e.yml; a separate, non-required check so it never
+# lengthens the critical path for unrelated changes.
+#
+# Needs a fourth sibling checkout system-e2e.yml does not: game-client, whose static bundle this
+# deployment serves (see compose.playtest.yml's own documented prerequisite).
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: >-
+          Repository name of the service/client under test (game-client, game-service,
+          timeline-service or read-service). Omit to run every repository at its default branch.
+        required: false
+        type: string
+        default: ''
+      ref:
+        description: Ref of the service/client under test. Ignored unless `service` is set.
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      service:
+        description: >-
+          Service/client under test. Leave as `all` to run every repository at its default branch.
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - game-client
+          - game-service
+          - timeline-service
+          - read-service
+      ref:
+        description: Ref of the service/client under test. Required unless `service` is `all`.
+        required: false
+        type: string
+        default: ''
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One browser proof at a time per triggering ref — the run holds fixed host ports (see
+  # compose.browser-e2e.yml) and adds a one-line hosts-file alias.
+  group: browser-e2e-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser-e2e:
+    name: browser-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Validate service/ref inputs
+        if: (inputs.service != '' && inputs.service != 'all' && inputs.ref == '') || ((inputs.service == '' || inputs.service == 'all') && inputs.ref != '')
+        run: |
+          echo "::error::service='${INPUT_SERVICE}' and ref='${INPUT_REF}' must be given together -- otherwise every repository silently runs at 'main' and the ref under test is never built."
+          exit 1
+        env:
+          INPUT_SERVICE: ${{ inputs.service }}
+          INPUT_REF: ${{ inputs.ref }}
+
+      - name: Check out infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/infrastructure
+          ref: ${{ github.repository == 'temporal-rift/infrastructure' && github.sha || 'main' }}
+          path: infrastructure
+          persist-credentials: false
+
+      - name: Check out game-client
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/game-client
+          ref: ${{ inputs.service == 'game-client' && inputs.ref || 'main' }}
+          path: game-client
+          persist-credentials: false
+
+      - name: Check out game-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/game-service
+          ref: ${{ inputs.service == 'game-service' && inputs.ref || 'main' }}
+          path: game-service
+          persist-credentials: false
+
+      - name: Check out timeline-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/timeline-service
+          ref: ${{ inputs.service == 'timeline-service' && inputs.ref || 'main' }}
+          path: timeline-service
+          persist-credentials: false
+
+      - name: Check out read-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/read-service
+          ref: ${{ inputs.service == 'read-service' && inputs.ref || 'main' }}
+          path: read-service
+          persist-credentials: false
+
+      - name: Report sources under test
+        run: |
+          echo "Service/client under test: ${INPUT_SERVICE:-<none — all repositories at default branch>}"
+          for repo in infrastructure game-client game-service timeline-service read-service; do
+            echo "$repo $(git -C "$repo" rev-parse --short HEAD)"
+          done
+        env:
+          INPUT_SERVICE: ${{ inputs.service }}
+
+      - name: Verify Docker Compose supports the playtest override
+        run: |
+          version="$(docker compose version --short)"
+          echo "docker compose $version"
+          required=2.24.4
+          if [ "$(printf '%s\n%s\n' "$required" "$version" | sort -V | head -n1)" != "$required" ]; then
+            echo "::error::docker compose $version is older than the required $required"
+            exit 1
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@8f152de45cc393bb48ce5d89d36b731f54556e65 # v5
+        with:
+          node-version-file: game-client/package.json
+
+      - name: Setup Maven Action
+        uses: s4u/setup-maven-action@ba34de01b7f4ba2ab8e2860df8993a29f4477056 # v1.20.0
+        with:
+          java-version: 26
+          java-distribution: temurin
+          maven-version: 3.9.13
+          settings-githubServer: false
+          checkout-enabled: false
+
+      - name: Cache Maven packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-browser-e2e-${{ hashFiles('infrastructure/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-browser-e2e-
+
+      - name: Run browser E2E
+        working-directory: infrastructure
+        run: mvn --batch-mode verify -Pbrowser-e2e
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: infrastructure/target/browser-e2e-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Failsafe's post-integration-test teardown does not run if the job is cancelled or the JVM
+      # dies. Scoped to the `temporal-rift-browser-e2e` project name, so it removes exactly what
+      # this run created and cannot touch system-e2e's or security-e2e's stacks.
+      - name: Tear down browser-e2e stack
+        if: always()
+        working-directory: infrastructure
+        run: bash scripts/stop-browser-e2e-stack.sh
