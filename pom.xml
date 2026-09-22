@@ -18,6 +18,7 @@
 
     <properties>
         <maven.exec.version>3.5.0</maven.exec.version>
+        <sonar.organization>temporal-rift</sonar.organization>
         <sonar.projectKey>temporal-rift_infrastructure</sonar.projectKey>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
         <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml
