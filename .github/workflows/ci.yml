@@ -1,0 +1,71 @@
+name: CI
+
+# Fast unit-test-and-analyze job for the temporal-rift-system-tests module (this repository's root
+# pom): no Docker, no profile, just `mvn verify` (compile, unit tests, JaCoCo coverage) plus a
+# SonarCloud CI-based scan so this repo's Sonar analysis has real coverage data to report, matching
+# every sibling Java service. Independent of system-e2e.yml/security-e2e.yml/browser-e2e.yml, which
+# own the Docker-based system suites and are unaffected by this workflow existing.
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch base branch for SonarCloud PR analysis
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+
+      - name: Setup Maven Action
+        uses: s4u/setup-maven-action@ba34de01b7f4ba2ab8e2860df8993a29f4477056 # v1.20.0
+        with:
+          java-version: 26
+          java-distribution: temurin
+          maven-version: 3.9.13
+          settings-githubServer: false
+          checkout-enabled: false
+
+      - name: Cache SonarQube packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
+
+      - name: Cache Maven packages
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-build-test-analyze-${{ hashFiles('pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-build-test-analyze-
+
+      - name: Build, test and analyze
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PR_KEY: ${{ github.event.pull_request.number }}
+          SONAR_PR_BRANCH: ${{ github.head_ref }}
+          SONAR_PR_BASE: ${{ github.base_ref }}
+        run: |
+          SONAR_ARGS=()
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            SONAR_ARGS=(
+              "-Dsonar.pullrequest.key=$SONAR_PR_KEY"
+              "-Dsonar.pullrequest.branch=$SONAR_PR_BRANCH"
+              "-Dsonar.pullrequest.base=$SONAR_PR_BASE"
+            )
+          fi
+          mvn --batch-mode verify sonar:sonar "${SONAR_ARGS[@]}"

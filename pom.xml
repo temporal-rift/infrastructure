@@ -18,6 +18,10 @@
 
     <properties>
         <maven.exec.version>3.5.0</maven.exec.version>
+        <sonar.projectKey>temporal-rift_infrastructure</sonar.projectKey>
+        <sonar.host.url>https://sonarcloud.io</sonar.host.url>
+        <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml
+        </sonar.coverage.jacoco.xmlReportPaths>
     </properties>
 
     <dependencies>
@@ -53,6 +57,12 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>${maven.exec.version}</version>
+            </plugin>
+            <!-- Version/executions (prepare-agent, XML report) inherited from temporal-rift-bom's
+                 pluginManagement, matching every sibling Java service. -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
             </plugin>
         </plugins>
     </build>
