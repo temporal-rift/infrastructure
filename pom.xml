@@ -21,11 +21,11 @@
         <sonar.organization>temporal-rift</sonar.organization>
         <sonar.projectKey>temporal-rift_infrastructure</sonar.projectKey>
         <sonar.host.url>https://sonarcloud.io</sonar.host.url>
-        <!-- This module's only tests are Failsafe *IT classes gated behind the e2e/security-e2e/browser-e2e
-             profiles, so unit-test coverage (jacoco/jacoco.xml) is always empty here; the integration
-             report (jacoco-it/jacoco.xml, from an -Pe2e or -Psecurity-e2e run) is what has real data. -->
-        <sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco/jacoco.xml,${project.build.directory}/site/jacoco-it/jacoco.xml
-        </sonar.coverage.jacoco.xmlReportPaths>
+        <!-- This module is a black-box system-test harness, not a service with unit-testable
+             production code (one incidental helper class). A coverage percentage here doesn't mean
+             anything, so it's excluded from the metric entirely rather than chased with test-profile
+             gymnastics; Sonar still runs for code smells/bugs/security. -->
+        <sonar.coverage.exclusions>**/*</sonar.coverage.exclusions>
     </properties>
 
     <dependencies>
@@ -61,12 +61,6 @@
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>${maven.exec.version}</version>
-            </plugin>
-            <!-- Version/executions (prepare-agent, XML report) inherited from temporal-rift-bom's
-                 pluginManagement, matching every sibling Java service. -->
-            <plugin>
-                <groupId>org.jacoco</groupId>
-                <artifactId>jacoco-maven-plugin</artifactId>
             </plugin>
         </plugins>
     </build>
