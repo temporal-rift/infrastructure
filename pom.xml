@@ -358,23 +358,6 @@
                         <version>${maven.exec.version}</version>
                         <executions>
                             <execution>
-                                <!-- Bound after test-compile so the test classpath (carrying the
-                                     Playwright dependency) is available to its own install CLI. -->
-                                <id>install-playwright-browsers</id>
-                                <phase>process-test-classes</phase>
-                                <goals>
-                                    <goal>java</goal>
-                                </goals>
-                                <configuration>
-                                    <mainClass>com.microsoft.playwright.CLI</mainClass>
-                                    <classpathScope>test</classpathScope>
-                                    <arguments>
-                                        <argument>install</argument>
-                                        <argument>chromium</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                            <execution>
                                 <id>start-browser-e2e-stack</id>
                                 <phase>pre-integration-test</phase>
                                 <goals>

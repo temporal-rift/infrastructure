@@ -1,6 +1,7 @@
 package io.github.temporalrift.systemtest.browser;
 
 import java.nio.file.Path;
+import java.util.regex.Pattern;
 
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
@@ -54,11 +55,15 @@ final class BrowserPlayer implements AutoCloseable {
     }
 
     // mock-oauth2-server's own interactive debug login page (not this codebase's markup): a plain
-    // form with a "username" field the caller supplies as the token's eventual subject claim.
+    // form with a "username" field the caller supplies as the token's eventual subject claim, and
+    // an `<input type="submit" value="Sign-in">` (hyphenated, confirmed against the real container
+    // — not the hyphen-free "Sign in" text game-client's own sign-in button uses).
     private static void performMockIssuerLogin(Page page, String subject) {
         page.locator("input[name='username']").waitFor();
         page.locator("input[name='username']").fill(subject);
-        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Sign in"))
+        page.getByRole(
+                        AriaRole.BUTTON,
+                        new Page.GetByRoleOptions().setName(Pattern.compile("Sign.?in", Pattern.CASE_INSENSITIVE)))
                 .click();
     }
 

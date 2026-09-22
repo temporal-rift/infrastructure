@@ -21,6 +21,19 @@ issuer_host="browser-e2e-auth"
 issuer_url="http://${issuer_host}:8080/default"
 external_origin="https://localhost:20443"
 
+echo "Installing Playwright's Chromium browser..."
+# A standalone `mvn` invocation, deliberately not bound as an execution inside the browser-e2e
+# profile's own lifecycle: exec-maven-plugin's `java` goal runs the target class in Maven's own
+# JVM rather than forking one, and Playwright's CLI driver calls System.exit() once the install
+# finishes. Bound in-lifecycle, that silently kills the entire `mvn verify` process right there —
+# every later phase (this script, Failsafe, teardown) never runs, yet the step still reports
+# success because the CLI's own exit code was 0. A separate process here cannot take the enclosing
+# build down with it.
+(cd "$repo_root" && mvn --batch-mode --quiet exec:java \
+  -Dexec.mainClass=com.microsoft.playwright.CLI \
+  -Dexec.classpathScope=test \
+  -Dexec.args="install chromium")
+
 echo "Ensuring ${issuer_host} resolves locally for the interactive mock issuer..."
 if ! getent hosts "$issuer_host" >/dev/null 2>&1; then
   echo "127.0.0.1 ${issuer_host}" | sudo tee -a /etc/hosts >/dev/null
