@@ -35,8 +35,17 @@ echo "Installing Playwright's Chromium browser..."
   -Dexec.args="install chromium")
 
 echo "Ensuring ${issuer_host} resolves locally for the interactive mock issuer..."
-if ! getent hosts "$issuer_host" >/dev/null 2>&1; then
+hosts_marker="$tls_dir/.hosts-entry-added"
+mkdir -p "$tls_dir"
+if getent hosts "$issuer_host" >/dev/null 2>&1; then
+  # Already resolves (a previous run's entry, or something else on this host) — not ours to
+  # remove at teardown, so no marker is written.
+  rm -f "$hosts_marker"
+else
   echo "127.0.0.1 ${issuer_host}" | sudo tee -a /etc/hosts >/dev/null
+  # Recorded so stop-browser-e2e-stack.sh removes only the exact entry this run added, never a
+  # pre-existing one, and never leaves a privileged alias behind for later unrelated processes.
+  touch "$hosts_marker"
 fi
 
 echo "Generating local TLS material for the playtest edge..."

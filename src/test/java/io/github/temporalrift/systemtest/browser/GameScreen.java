@@ -5,6 +5,7 @@ import java.util.regex.Pattern;
 
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.AriaRole;
 
 /**
@@ -19,10 +20,33 @@ import com.microsoft.playwright.options.AriaRole;
  */
 final class GameScreen {
 
+    // Short and explicit: these probe reads run inside polling predicates (see
+    // BrowserGameScenario.waitUntil), which retry every 500ms. Playwright's own default
+    // actionability timeout is 30s — left in place, a probe called before its element exists would
+    // block for 30s and throw TimeoutError, aborting the whole poll instead of just failing this one
+    // tick. safeInnerText/safeIsEnabled catch exactly that timeout and report "not ready yet".
+    private static final int PROBE_TIMEOUT_MS = 2000;
+
     private final Page page;
 
     GameScreen(Page page) {
         this.page = page;
+    }
+
+    private static String safeInnerText(Locator locator) {
+        try {
+            return locator.innerText(new Locator.InnerTextOptions().setTimeout(PROBE_TIMEOUT_MS));
+        } catch (TimeoutError timeout) {
+            return "";
+        }
+    }
+
+    private static boolean safeIsEnabled(Locator locator) {
+        try {
+            return locator.isEnabled(new Locator.IsEnabledOptions().setTimeout(PROBE_TIMEOUT_MS));
+        } catch (TimeoutError timeout) {
+            return false;
+        }
     }
 
     // --- Lobby ---------------------------------------------------------
@@ -43,11 +67,12 @@ final class GameScreen {
     }
 
     String lobbyId() {
-        return page.getByLabel("Game lobby").locator("dl dd").first().innerText();
+        var dd = page.getByLabel("Game lobby").locator("dl dd").first();
+        return dd.count() > 0 ? safeInnerText(dd) : "";
     }
 
     String invitationUrl() {
-        return page.locator("code").innerText();
+        return safeInnerText(page.locator("code"));
     }
 
     int memberCount() {
@@ -56,7 +81,7 @@ final class GameScreen {
 
     boolean isReadyToStart() {
         var startButton = page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Start game"));
-        return startButton.count() > 0 && startButton.isEnabled();
+        return startButton.count() > 0 && safeIsEnabled(startButton);
     }
 
     void startGame() {
@@ -127,7 +152,7 @@ final class GameScreen {
      * advanced (e.g. after a timeout) rather than merely re-rendering the same one. */
     String currentRoundLabel() {
         var label = actionSection().locator("p").first();
-        return label.count() > 0 ? label.innerText() : "";
+        return label.count() > 0 ? safeInnerText(label) : "";
     }
 
     boolean hasSubmittedAction() {
@@ -137,39 +162,39 @@ final class GameScreen {
                 > 0;
     }
 
-    /** This player's own dealt hand, as rendered only to its owner — the isolation check's ground
-     * truth for what must never appear in any other context's captured network traffic. */
-    List<String> handCardNames() {
-        return actionSection().getByLabel("Hand").locator("li").allInnerTexts();
-    }
-
     /**
      * Selects the first enabled option — a faction special if {@code preferSpecial} and one is
      * enabled, otherwise the first enabled hand card — resolves whatever target picker then
      * appears using only what is rendered, and confirms. Mirrors a human choosing any legal option
      * rather than the harness deciding legality itself.
+     *
+     * @return true if a faction special was actually used (as opposed to falling back to a card,
+     *     or nothing being enabled yet)
      */
-    void submitFirstAvailableAction(boolean preferSpecial) {
+    boolean submitFirstAvailableAction(boolean preferSpecial) {
         var section = actionSection();
         Locator chosen = preferSpecial
                 ? firstEnabled(section.getByLabel("Faction specials").locator("button"))
                 : null;
+        boolean usedSpecial = chosen != null;
         if (chosen == null) {
             chosen = firstEnabled(section.getByLabel("Hand").locator("button"));
         }
         if (chosen == null) {
             chosen = firstEnabled(section.getByLabel("Faction specials").locator("button"));
+            usedSpecial = chosen != null;
         }
         if (chosen == null) {
             // Nothing enabled yet (the round just opened and is still rendering availability) —
             // the caller polls, so simply not acting this tick is correct; forcing a click here
             // would throw instead of retrying.
-            return;
+            return false;
         }
         chosen.click();
         resolveTargetIfPresent(section);
         section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm action"))
                 .click();
+        return usedSpecial;
     }
 
     private void resolveTargetIfPresent(Locator section) {
@@ -200,7 +225,7 @@ final class GameScreen {
         int count = candidates.count();
         for (int i = 0; i < count; i++) {
             var candidate = candidates.nth(i);
-            if (candidate.isEnabled()) {
+            if (safeIsEnabled(candidate)) {
                 return candidate;
             }
         }
@@ -259,5 +284,15 @@ final class GameScreen {
 
     List<String> winnerNames() {
         return resultsSection().getByLabel("Winners").locator("li strong").allInnerTexts();
+    }
+
+    // --- Knowledge (earned intel) ------------------------------------------
+
+    /** This player's own earned intel (Scan/Trace/Intercept), rendered only to its owner — used
+     * alongside the network-payload check as a second, DOM-level isolation signal for future
+     * intelligence, distinct from the hand-card identity check. */
+    List<String> earnedKnowledgeEntries() {
+        var list = page.getByLabel("Your earned knowledge");
+        return list.count() > 0 ? list.locator("li").allInnerTexts() : List.of();
     }
 }

@@ -58,6 +58,7 @@ mkdir -p "$token_root/traces"
 echo '{"ok":true}' > "$token_root/manifest.json"
 echo "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz.signature" > "$token_root/traces/leak.txt"
 expect_fail "a bundle containing a bearer token is refused" run_capture "$token_root"
+[ ! -e "$token_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
 
 # --- A PEM private key anywhere in a captured file must fail the capture step. ---
 key_root="$fixtures_dir/key"
@@ -66,6 +67,28 @@ echo '{"ok":true}' > "$key_root/manifest.json"
 printf -- '-----BEGIN PRIVATE KEY-----\nMIIBVgIBADANBgkqhkiG9w0BAQEFAASCAT8wggE7AgEAAkEA\n-----END PRIVATE KEY-----\n' \
   > "$key_root/traces/leak.txt"
 expect_fail "a bundle containing a private key is refused" run_capture "$key_root"
+[ ! -e "$key_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
+
+# --- A credential inside a Playwright trace .zip archive (not just plain text files) must also
+# fail the capture step: plain grep skips binary files and would otherwise miss it entirely. ---
+zip_root="$fixtures_dir/zip"
+mkdir -p "$zip_root/traces"
+echo '{"ok":true}' > "$zip_root/manifest.json"
+zip_workdir="$(mktemp -d)"
+echo "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz.signature" > "$zip_workdir/trace.trace"
+python_bin=""
+for candidate in python3 python; do
+  if "$candidate" --version >/dev/null 2>&1; then
+    python_bin="$candidate"
+    break
+  fi
+done
+[ -n "$python_bin" ] || { echo "SKIP: no working python interpreter found for the zip-archive fixture"; exit 0; }
+"$python_bin" -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1], 'w').write(sys.argv[2], 'trace.trace')" \
+  "$zip_root/traces/host-123.zip" "$zip_workdir/trace.trace"
+rm -rf "$zip_workdir"
+expect_fail "a bundle whose trace archive contains a bearer token is refused" run_capture "$zip_root"
+[ ! -e "$zip_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures fixture check(s) failed."

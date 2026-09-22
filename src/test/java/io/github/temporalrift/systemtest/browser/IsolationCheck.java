@@ -3,29 +3,41 @@ package io.github.temporalrift.systemtest.browser;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Asserts private-view isolation the way the architecture notes insist it must be checked: against
  * the actual network payloads every context receives, not just what happens to be rendered — "hiding
- * a field visually does not secure it." Ground truth for each player's own hand is read from that
- * player's own rendered UI (the one place it is legitimately shown), then every other player's full
- * captured network traffic is searched for it.
+ * a field visually does not secure it."
+ *
+ * <p>Ground truth for each player's own hand is each exact {@code cardInstanceId} that ever appears
+ * in that player's own captured traffic — read continuously throughout the session, not from a DOM
+ * snapshot that could disappear once the game reaches terminal results — rather than rendered card
+ * name/grade text: game-client can legitimately deal two different players a card sharing the same
+ * displayed name and grade (different instances, same type), which a text-based check would either
+ * miss or misreport. Every other player's full captured traffic is then searched for those exact
+ * ids, which cannot collide across distinct card instances.
  */
 final class IsolationCheck {
+
+    private static final Pattern CARD_INSTANCE_ID =
+            Pattern.compile("\"cardInstanceId\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
 
     private IsolationCheck() {}
 
     static void assertHandsStayPrivate(List<BrowserPlayer> players) {
-        Map<String, List<String>> ownHandByPlayer = new LinkedHashMap<>();
+        Map<String, Set<String>> ownCardIdsByPlayer = new LinkedHashMap<>();
         for (var player : players) {
-            ownHandByPlayer.put(player.name(), player.screen().handCardNames());
+            ownCardIdsByPlayer.put(player.name(), cardInstanceIdsSeenBy(player));
         }
 
         for (var owner : players) {
-            var ownCards = ownHandByPlayer.get(owner.name());
-            assertThat(ownCards)
+            var ownIds = ownCardIdsByPlayer.get(owner.name());
+            assertThat(ownIds)
                     .as("%s's own hand must be visible to itself", owner.name())
                     .isNotEmpty();
 
@@ -33,18 +45,71 @@ final class IsolationCheck {
                 if (other == owner) {
                     continue;
                 }
-                var otherTraffic = other.network().capturedExchanges();
-                for (var exchange : otherTraffic) {
+                for (var exchange : other.network().capturedExchanges()) {
                     var body = exchange.responseBody();
                     if (body == null) {
                         continue;
                     }
-                    for (var card : ownCards) {
+                    for (var cardId : ownIds) {
                         assertThat(body)
                                 .as(
-                                        "%s's network traffic (%s) must never contain %s's private hand card '%s'",
-                                        other.name(), exchange.url(), owner.name(), card)
-                                .doesNotContain(card);
+                                        "%s's network traffic (%s) must never contain %s's private card instance '%s'",
+                                        other.name(), exchange.url(), owner.name(), cardId)
+                                .doesNotContain(cardId);
+                    }
+                }
+            }
+        }
+    }
+
+    private static Set<String> cardInstanceIdsSeenBy(BrowserPlayer player) {
+        Set<String> ids = new LinkedHashSet<>();
+        for (var exchange : player.network().capturedExchanges()) {
+            var body = exchange.responseBody();
+            if (body == null) {
+                continue;
+            }
+            var matcher = CARD_INSTANCE_ID.matcher(body);
+            while (matcher.find()) {
+                ids.add(matcher.group(1));
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * Second, DOM-level isolation signal covering earned intel (future intelligence): each entry a
+     * player's own "Your earned knowledge" panel renders (Scan/Trace/Intercept text, distinctive
+     * enough — event titles, exact percentages, revealed player names — that unlike hand cards a
+     * plain text match is not collision-prone) must never appear in another context's traffic.
+     * Faction identity and unresolved-opponent-decision coverage are not implemented: game-client's
+     * live (non-fixture) view has no real faction display to read from at all, and the exact wire
+     * shape a normal-player payload would leak an unresolved decision through is not something this
+     * suite can verify without a live stack to inspect — left as a known, documented gap rather than
+     * a guessed-at check.
+     */
+    static void assertEarnedKnowledgeStaysPrivate(List<BrowserPlayer> players) {
+        Map<String, List<String>> ownKnowledgeByPlayer = new LinkedHashMap<>();
+        for (var player : players) {
+            ownKnowledgeByPlayer.put(player.name(), player.screen().earnedKnowledgeEntries());
+        }
+
+        for (var owner : players) {
+            for (var entry : ownKnowledgeByPlayer.get(owner.name())) {
+                for (var other : players) {
+                    if (other == owner) {
+                        continue;
+                    }
+                    for (var exchange : other.network().capturedExchanges()) {
+                        var body = exchange.responseBody();
+                        if (body == null) {
+                            continue;
+                        }
+                        assertThat(body)
+                                .as(
+                                        "%s's network traffic (%s) must never contain %s's earned knowledge '%s'",
+                                        other.name(), exchange.url(), owner.name(), entry)
+                                .doesNotContain(entry);
                     }
                 }
             }

@@ -3,8 +3,10 @@ package io.github.temporalrift.systemtest.browser;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 import org.junit.jupiter.api.AfterEach;
@@ -42,6 +44,7 @@ class BrowserGameplayIT {
                     .isNotEmpty();
         }
         IsolationCheck.assertHandsStayPrivate(players);
+        IsolationCheck.assertEarnedKnowledgeStaysPrivate(players);
         assertTimingIsRecordedAsATestOverride();
     }
 
@@ -51,14 +54,25 @@ class BrowserGameplayIT {
         var players = signInAndStartLobby(
                 "Erasers seat", "Prophets seat", "Revisionists seat", "Weavers seat", "Activists seat");
 
-        driveGameToResults(players, true);
+        // The live client has no real faction display to read (only game-client's always-rendered
+        // sample fixture shows a faction, which is not this game's actual state — see
+        // AppShell/sampleFixturePlayerView), so this cannot assert five distinct factions or map a
+        // used special back to its owning faction. What is verifiable end to end: every seat reaches
+        // authoritative results, and at least one faction special is exercised through the browser
+        // somewhere in the game — weaker than "every faction's special", but concrete evidence
+        // rather than a vacuously passing loop.
+        var usedAnySpecial = driveGameToResults(players, true);
 
         for (var player : players) {
             assertThat(player.screen().winnerNames())
                     .as("%s's browser shows authoritative winners", player.name())
                     .isNotEmpty();
         }
+        assertThat(usedAnySpecial)
+                .as("at least one faction special is submitted through the browser during the game")
+                .isTrue();
         IsolationCheck.assertHandsStayPrivate(players);
+        IsolationCheck.assertEarnedKnowledgeStaysPrivate(players);
     }
 
     @Test
@@ -142,7 +156,17 @@ class BrowserGameplayIT {
         }
     }
 
-    private void driveGameToResults(List<BrowserPlayer> players, boolean preferSpecial) {
+    /**
+     * Drives every player to authoritative terminal results, submitting whatever step is currently
+     * open for each. Never re-submits a round already accepted: the polling window would otherwise
+     * see the same "Confirm action" control between a click and the server's acknowledgement and
+     * submit a second action for that round, hiding exactly the duplicate-spend defect
+     * {@link #reloadAndRoundTimeoutRecoverWithoutDuplicateSpendOrDeadlock} exists to catch.
+     *
+     * @return true if any player's action round used a faction special at least once during the game
+     */
+    private boolean driveGameToResults(List<BrowserPlayer> players, boolean preferSpecial) {
+        Map<String, Boolean> usedSpecial = new HashMap<>();
         BrowserGameScenario.waitUntil(
                 () -> {
                     boolean allDone = true;
@@ -154,8 +178,10 @@ class BrowserGameplayIT {
                         allDone = false;
                         if (screen.isHandKeepOffered()) {
                             screen.keepFirstFiveOfferedCards();
-                        } else if (screen.hasOpenActionRound()) {
-                            screen.submitFirstAvailableAction(preferSpecial);
+                        } else if (screen.hasOpenActionRound() && !screen.hasSubmittedAction()) {
+                            if (screen.submitFirstAvailableAction(preferSpecial)) {
+                                usedSpecial.put(player.name(), true);
+                            }
                         } else if (screen.hasOpenParadoxChoice()) {
                             screen.submitFirstEligibleParadoxChoice();
                         } else if (screen.canRefreshResults()) {
@@ -165,6 +191,7 @@ class BrowserGameplayIT {
                     return allDone;
                 },
                 "every player reaches authoritative terminal results");
+        return usedSpecial.containsValue(true);
     }
 
     private void assertTimingIsRecordedAsATestOverride() {
