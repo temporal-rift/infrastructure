@@ -209,42 +209,14 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
+      # `sonar.coverage.exclusions=**/*` (pom.xml) keeps this module out of the coverage metric
+      # entirely: it's a black-box system-test harness, not a service with meaningful unit-testable
+      # production code, so a coverage percentage here doesn't mean anything. Sonar still runs for
+      # code smells/bugs/security. Only runs when infrastructure's own commit is under test: under
+      # workflow_call from a sibling service's PR, this repository's checked-out ref is just `main`
+      # (see "Check out infrastructure" above), so analyzing it here would be redundant/stale and
+      # SONAR_TOKEN wouldn't be scoped for that caller anyway.
       - name: Run system E2E
-        working-directory: infrastructure
-        run: mvn --batch-mode verify -Pe2e
-
-      # This module's only production class (KafkaDlqReplay) is exercised solely by
-      # KafkaDlqReplayIT, which lives in the security-e2e profile, not this one — submitting Sonar
-      # coverage from -Pe2e alone would always show 0% for the module's one real class no matter how
-      # many times it reruns. Running -Psecurity-e2e here too (without a `clean` in between) appends
-      # its Failsafe execution data onto the same target/jacoco-it.exec that -Pe2e already wrote, so
-      # the report-integration execution below reflects the union of both suites. Restricted to
-      # infrastructure's own commit: under workflow_call from a sibling service, this data is never
-      # submitted to Sonar (see the scan step below), so running it there would just waste that
-      # caller's CI minutes for no benefit. security-e2e.yml still runs these same tests independently
-      # as its own required check — this duplicates ~10 minutes of Failsafe execution purely so this
-      # job's coverage data is complete, which is judged worth the cost for a required check that
-      # otherwise structurally could never reflect this module's actual coverage.
-      - name: Run security E2E (for combined coverage)
-        if: github.repository == 'temporal-rift/infrastructure'
-        working-directory: infrastructure
-        run: mvn --batch-mode verify -Psecurity-e2e
-
-      # Mirrors security-e2e.yml's own teardown: Failsafe's post-integration-test teardown does not
-      # run if the job is cancelled or the JVM dies. Safe to run even if the step above never started
-      # anything — `docker compose down` against a project with no resources is a no-op.
-      - name: Tear down secure system under test
-        if: always() && github.repository == 'temporal-rift/infrastructure'
-        working-directory: infrastructure
-        run: docker compose -f compose.secure.yml down -v --remove-orphans
-
-      # Only runs when infrastructure's own commit is the thing under test: under workflow_call from
-      # a sibling service's PR, this repository's checked-out ref is just `main` (see "Check out
-      # infrastructure" above), so analyzing it here would be redundant/stale and SONAR_TOKEN
-      # wouldn't be scoped for that caller anyway. Reruns jacoco:report/report-integration
-      # (via `verify`) to pick up the combined exec data from both steps above before scanning.
-      - name: Run SonarCloud scan
-        if: github.repository == 'temporal-rift/infrastructure'
         working-directory: infrastructure
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -252,13 +224,16 @@ jobs:
           SONAR_PR_BRANCH: ${{ github.head_ref }}
           SONAR_PR_BASE: ${{ github.base_ref }}
         run: |
-          GOALS=(--batch-mode verify sonar:sonar)
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            GOALS+=(
-              "-Dsonar.pullrequest.key=$SONAR_PR_KEY"
-              "-Dsonar.pullrequest.branch=$SONAR_PR_BRANCH"
-              "-Dsonar.pullrequest.base=$SONAR_PR_BASE"
-            )
+          GOALS=(--batch-mode verify -Pe2e)
+          if [[ "$GITHUB_REPOSITORY" == "temporal-rift/infrastructure" ]]; then
+            GOALS+=(sonar:sonar)
+            if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+              GOALS+=(
+                "-Dsonar.pullrequest.key=$SONAR_PR_KEY"
+                "-Dsonar.pullrequest.branch=$SONAR_PR_BRANCH"
+                "-Dsonar.pullrequest.base=$SONAR_PR_BASE"
+              )
+            fi
           fi
           mvn "${GOALS[@]}"
 
