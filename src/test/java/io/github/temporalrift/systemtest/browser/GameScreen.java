@@ -20,6 +20,12 @@ import com.microsoft.playwright.options.AriaRole;
  */
 final class GameScreen {
 
+    enum ActionSubmission {
+        NONE,
+        CARD,
+        SPECIAL
+    }
+
     // Short and explicit: these probe reads run inside polling predicates (see
     // BrowserGameScenario.waitUntil), which retry every 500ms. Playwright's own default
     // actionability timeout is 30s — left in place, a probe called before its element exists would
@@ -152,41 +158,51 @@ final class GameScreen {
     }
 
     /**
-     * Selects the first enabled option — a faction special if {@code preferSpecial} and one is
-     * enabled, otherwise the first enabled hand card — resolves whatever target picker then
-     * appears using only what is rendered, and confirms. Mirrors a human choosing any legal option
-     * rather than the harness deciding legality itself.
+     * Tries enabled options in preference order, resolves each rendered target picker, and submits
+     * the first option whose confirmation becomes enabled. Mirrors a human choosing a legal option
+     * from the visible controls rather than the harness deciding legality itself.
      *
-     * @return true if a faction special was actually used (as opposed to falling back to a card,
-     *     or nothing being enabled yet)
+     * @return the option submitted, or {@code NONE} if no complete option is rendered yet
      */
-    boolean submitFirstAvailableAction(boolean preferSpecial) {
+    ActionSubmission submitFirstAvailableAction(boolean preferSpecial) {
         var section = actionSection();
-        Locator chosen = preferSpecial
-                ? firstEnabled(section.getByLabel("Faction specials").locator("button"))
-                : null;
-        boolean usedSpecial = chosen != null;
-        if (chosen == null) {
-            chosen = firstEnabled(section.getByLabel("Hand").locator("button"));
+        var cards = section.getByLabel("Hand").locator("button");
+        var specials = section.getByLabel("Faction specials").locator("button");
+        var first = preferSpecial
+                ? submitFirstCompletableOption(section, specials, ActionSubmission.SPECIAL)
+                : submitFirstCompletableOption(section, cards, ActionSubmission.CARD);
+        if (first != ActionSubmission.NONE) {
+            return first;
         }
-        if (chosen == null) {
-            chosen = firstEnabled(section.getByLabel("Faction specials").locator("button"));
-            usedSpecial = chosen != null;
-        }
-        if (chosen == null) {
-            // Nothing enabled yet (the round just opened and is still rendering availability) —
-            // the caller polls, so simply not acting this tick is correct; forcing a click here
-            // would throw instead of retrying.
-            return false;
-        }
-        chosen.click();
-        resolveTargetIfPresent(section);
+        return preferSpecial
+                ? submitFirstCompletableOption(section, cards, ActionSubmission.CARD)
+                : submitFirstCompletableOption(section, specials, ActionSubmission.SPECIAL);
+    }
+
+    private ActionSubmission submitFirstCompletableOption(
+            Locator section, Locator options, ActionSubmission actionType) {
         var confirm = section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm action"));
-        if (!safeIsEnabled(confirm)) {
-            return false;
+        for (int i = 0; i < options.count(); i++) {
+            var option = options.nth(i);
+            if (!safeIsEnabled(option)) {
+                continue;
+            }
+            option.click();
+            resolveTargetIfPresent(section);
+            if (safeIsEnabled(confirm)) {
+                confirm.click();
+                return actionType;
+            }
         }
-        confirm.click();
-        return usedSpecial;
+        return ActionSubmission.NONE;
+    }
+
+    boolean hasAvailableSpecial() {
+        return firstEnabled(actionSection().getByLabel("Faction specials").locator("button")) != null;
+    }
+
+    String currentFaction() {
+        return safeInnerText(page.getByLabel("Your faction").locator("strong"));
     }
 
     private void resolveTargetIfPresent(Locator section) {
@@ -244,9 +260,16 @@ final class GameScreen {
 
     boolean hasOpenParadoxChoice() {
         return paradoxSection()
-                        .getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"))
-                        .count()
-                > 0;
+                                .getByRole(
+                                        AriaRole.BUTTON,
+                                        new Locator.GetByRoleOptions().setName("Confirm resolution choice"))
+                                .count()
+                        > 0
+                && paradoxSection()
+                                .getByLabel("Eligible resolution cards")
+                                .locator("button")
+                                .count()
+                        > 0;
     }
 
     void submitFirstEligibleParadoxChoice() {
@@ -255,12 +278,16 @@ final class GameScreen {
                 .locator("button")
                 .first()
                 .click();
-        section.getByLabel("Affected events")
-                .locator("ul[aria-label$='outcomes'] button")
-                .first()
-                .click();
-        section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"))
-                .click();
+        var outcomes = section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button");
+        if (outcomes.count() == 0) {
+            return;
+        }
+        outcomes.first().click();
+        var confirm =
+                section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"));
+        if (safeIsEnabled(confirm)) {
+            confirm.click();
+        }
     }
 
     // --- Results -----------------------------------------------------------
