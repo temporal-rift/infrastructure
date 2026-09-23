@@ -2,7 +2,7 @@
 # Shared by compose.yml's local dev broker and compose.secure.yml's demonstration of the
 # non-local authenticated topology, so retention per topic class can never drift between the
 # two. retention.ms is pinned explicitly instead of left at the broker default, matching
-# event-schema.md: domain replay window for game.events/timeline.events, short-lived for the
+# the intended retention policy: domain replay window for game.events/timeline.events, short-lived for the
 # transient game.commands, extended for source-specific dead-letter topics.
 #
 # Usage: provision-kafka-topics.sh <bootstrap-server> [command-config-file]
