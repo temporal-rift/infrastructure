@@ -43,13 +43,35 @@ services:
     ports:
       - "8080:8080"
     # No healthcheck: this image is a distroless Jib build with no shell, wget, or curl, so no
-    # in-container probe command can run. Dependents use service_started; the stack script still
-    # verifies issuer readiness from the host (discovery document) after `up --wait` returns.
+    # in-container probe command can run. browser-e2e-auth-ready below gates dependents on real
+    # readiness instead; the stack script separately verifies host-side reachability (the browser's
+    # own path to the issuer) after `up --wait` returns.
 
-  game-service:
+  # Distroless browser-e2e-auth can't run its own healthcheck (see above), so this one-shot gate
+  # polls the issuer's discovery endpoint from inside the Compose network and exits once it
+  # responds. Issuer-dependent services below wait on this completing rather than on
+  # browser-e2e-auth's mere process start, so they never race the issuer's own startup to fetch
+  # discovery metadata. Same one-shot-gate pattern as compose.yml's kafka-topics service.
+  browser-e2e-auth-ready:
+    image: curlimages/curl:8.11.0
+    volumes:
+      - ./target/browser-e2e-tls/issuer-cert.pem:/tls/issuer-cert.pem:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until curl --fail --silent --show-error --cacert /tls/issuer-cert.pem \
+            https://browser-e2e-auth:8080/default/.well-known/openid-configuration >/dev/null; do
+          sleep 1
+        done
     depends_on:
       browser-e2e-auth:
         condition: service_started
+
+  game-service:
+    depends_on:
+      browser-e2e-auth-ready:
+        condition: service_completed_successfully
     environment:
       JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/temporal-rift/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
       # Bounded, explicitly labeled acceleration for this suite only — real playtests never set
@@ -62,8 +84,8 @@ services:
 
   timeline-service:
     depends_on:
-      browser-e2e-auth:
-        condition: service_started
+      browser-e2e-auth-ready:
+        condition: service_completed_successfully
     environment:
       JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/temporal-rift/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
       SPRING_APPLICATION_JSON: >-
@@ -73,8 +95,8 @@ services:
 
   read-service:
     depends_on:
-      browser-e2e-auth:
-        condition: service_started
+      browser-e2e-auth-ready:
+        condition: service_completed_successfully
     environment:
       JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/temporal-rift/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
     volumes:

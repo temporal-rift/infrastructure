@@ -212,6 +212,24 @@ sed 's#auth_request /_gameplay_health;#return 200;#' \
 PLAYTEST_NGINX_CONF="$readiness_root/nginx.conf" assert_failure_contains "must gate the exact client readiness path" \
   run_validator "$readiness_root"
 
+# A commented-out auth_request must not satisfy the check the way a plain substring grep would:
+# nginx never applies a directive inside a comment, so the health gate would be silently absent.
+readiness_commented_root="$fixtures_dir/readiness-commented"
+setup_valid_deployment "$readiness_commented_root"
+sed 's|auth_request /_gameplay_health;|# auth_request /_gameplay_health;|' \
+  "$repo_root/playtest/nginx.conf" > "$readiness_commented_root/nginx.conf"
+PLAYTEST_NGINX_CONF="$readiness_commented_root/nginx.conf" assert_failure_contains "must gate the exact client readiness path" \
+  run_validator "$readiness_commented_root"
+
+# Same for a commented-out internal directive: it must not exempt the backend health subrequest
+# from being treated as reachable from outside nginx.
+internal_commented_root="$fixtures_dir/internal-commented"
+setup_valid_deployment "$internal_commented_root"
+sed 's|internal;|# internal;|' \
+  "$repo_root/playtest/nginx.conf" > "$internal_commented_root/nginx.conf"
+PLAYTEST_NGINX_CONF="$internal_commented_root/nginx.conf" assert_failure_contains "must keep the backend health subrequest internal" \
+  run_validator "$internal_commented_root"
+
 # A generic ^~ /api/ route would shadow the service-specific regex routes.
 shadow_root="$fixtures_dir/shadow"
 setup_valid_deployment "$shadow_root"

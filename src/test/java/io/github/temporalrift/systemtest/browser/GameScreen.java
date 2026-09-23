@@ -216,23 +216,25 @@ final class GameScreen {
         var eventButtons = targetPicker.getByLabel("Events").locator(":scope > li > button");
         if (eventButtons.count() > 0) {
             eventButtons.first().click();
-            var sourceOutcomes = targetPicker.locator("ul[aria-label$='source outcomes'] button");
-            if (sourceOutcomes.count() > 0) {
-                sourceOutcomes.first().click();
+            var sourceOutcome = firstEnabled(targetPicker.locator("ul[aria-label$='source outcomes'] button"));
+            if (sourceOutcome != null) {
+                sourceOutcome.click();
                 var targetOutcomes = targetPicker.locator("ul[aria-label$='target outcomes'] button");
                 var targetOutcome = firstEnabled(targetOutcomes);
                 if (targetOutcome != null) {
                     targetOutcome.click();
                 }
             } else {
-                var outcomeButtons = targetPicker.locator("ul[aria-label$='outcomes'] button");
-                if (outcomeButtons.count() > 0) {
-                    outcomeButtons.first().click();
+                var outcomeButton = firstEnabled(targetPicker.locator("ul[aria-label$='outcomes'] button"));
+                if (outcomeButton != null) {
+                    outcomeButton.click();
                 } else {
                     var confirm = section.getByRole(
                             AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm action"));
                     for (int i = 1; i < eventButtons.count() && !safeIsEnabled(confirm); i++) {
-                        eventButtons.nth(i).click();
+                        if (safeIsEnabled(eventButtons.nth(i))) {
+                            eventButtons.nth(i).click();
+                        }
                     }
                 }
             }
@@ -281,11 +283,11 @@ final class GameScreen {
                 .locator("button")
                 .first()
                 .click();
-        var outcomes = section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button");
-        if (outcomes.count() == 0) {
+        var outcome = firstEnabled(section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button"));
+        if (outcome == null) {
             return;
         }
-        outcomes.first().click();
+        outcome.click();
         var confirm =
                 section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"));
         if (safeIsEnabled(confirm)) {
