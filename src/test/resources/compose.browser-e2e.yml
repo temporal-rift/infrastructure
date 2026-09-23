@@ -39,17 +39,14 @@ services:
       JSON_CONFIG: '{"interactiveLogin":true,"httpServer":"NettyWrapper"}'
     ports:
       - "8080:8080"
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/isalive"]
-      interval: 2s
-      timeout: 2s
-      retries: 30
-      start_period: 10s
+    # No healthcheck: this image is a distroless Jib build with no shell, wget, or curl, so no
+    # in-container probe command can run. Dependents use service_started; the stack script still
+    # verifies issuer readiness from the host (discovery document) after `up --wait` returns.
 
   game-service:
     depends_on:
       browser-e2e-auth:
-        condition: service_healthy
+        condition: service_started
     environment:
       # Bounded, explicitly labeled acceleration for this suite only — real playtests never set
       # this. Matches src/test/resources/compose.e2e.yml's precedent for shortening the same timers.
@@ -60,7 +57,7 @@ services:
   timeline-service:
     depends_on:
       browser-e2e-auth:
-        condition: service_healthy
+        condition: service_started
     environment:
       SPRING_APPLICATION_JSON: >-
         {"game":{"rules":{"paradox-resolution-timer-seconds":15}}}
@@ -68,7 +65,7 @@ services:
   read-service:
     depends_on:
       browser-e2e-auth:
-        condition: service_healthy
+        condition: service_started
 
   playtest-edge:
     # Distinct from compose.playtest.yml's default 80/443 so this suite can run alongside a real
@@ -78,4 +75,4 @@ services:
       - "20443:443"
     depends_on:
       browser-e2e-auth:
-        condition: service_healthy
+        condition: service_started

@@ -21,6 +21,17 @@ issuer_host="browser-e2e-auth"
 issuer_url="http://${issuer_host}:8080/default"
 external_origin="https://localhost:20443"
 
+# If any step below fails, Maven never reaches post-integration-test, so the profile's stop
+# execution never runs. Without this trap a failed startup would leave the hosts alias and a
+# partially created Compose project behind. Cleared once the issuer reachability check passes.
+startup_complete=""
+fail_cleanup() {
+  if [ -z "$startup_complete" ]; then
+    bash "$script_dir/stop-browser-e2e-stack.sh" || true
+  fi
+}
+trap fail_cleanup EXIT
+
 echo "Installing Playwright's Chromium browser..."
 # A standalone `mvn` invocation, deliberately not bound as an execution inside the browser-e2e
 # profile's own lifecycle: exec-maven-plugin's `java` goal runs the target class in Maven's own
@@ -91,5 +102,8 @@ docker compose -p temporal-rift-browser-e2e "${compose_files[@]}" up --build --w
 
 echo "Confirming the interactive issuer is reachable from the host at ${issuer_url}..."
 curl --fail --silent --show-error --max-time 10 "${issuer_url}/.well-known/openid-configuration" >/dev/null
+
+startup_complete=1
+trap - EXIT
 
 echo "Browser-e2e deployment is ready at ${external_origin}."

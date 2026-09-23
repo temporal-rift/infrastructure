@@ -74,7 +74,7 @@ expect_fail "a bundle containing a private key is refused" run_capture "$key_roo
 zip_root="$fixtures_dir/zip"
 mkdir -p "$zip_root/traces"
 echo '{"ok":true}' > "$zip_root/manifest.json"
-zip_workdir="$(mktemp -d)"
+zip_workdir="$(mktemp -d "$fixtures_dir/zip-workdir.XXXXXX")"
 echo "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz.signature" > "$zip_workdir/trace.trace"
 python_bin=""
 for candidate in python3 python; do
@@ -83,7 +83,7 @@ for candidate in python3 python; do
     break
   fi
 done
-[ -n "$python_bin" ] || { echo "SKIP: no working python interpreter found for the zip-archive fixture"; exit 0; }
+[ -n "$python_bin" ] || { echo "FAIL: no working python interpreter found for the zip-archive fixture"; exit 1; }
 "$python_bin" -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1], 'w').write(sys.argv[2], 'trace.trace')" \
   "$zip_root/traces/host-123.zip" "$zip_workdir/trace.trace"
 rm -rf "$zip_workdir"

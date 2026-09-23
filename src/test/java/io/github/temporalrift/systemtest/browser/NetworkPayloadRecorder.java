@@ -28,13 +28,13 @@ final class NetworkPayloadRecorder {
         String requestBody;
         try {
             requestBody = response.request().postData();
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException _) {
             requestBody = null;
         }
         String responseBody;
         try {
             responseBody = response.text();
-        } catch (RuntimeException exception) {
+        } catch (RuntimeException _) {
             // Non-text responses (e.g. static assets) carry nothing an isolation check needs.
             responseBody = null;
         }
