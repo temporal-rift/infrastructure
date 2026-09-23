@@ -4,8 +4,13 @@ name: Browser E2E
 # separately authenticated Playwright browser contexts driving the actual game-client bundle against
 # the isolated playtest deployment topology (infrastructure#46), under accelerated, explicitly
 # labeled test-override timing. Independent of system-e2e.yml (its own Compose project,
-# temporal-rift-browser-e2e) and of security-e2e.yml; a separate, non-required check so it never
-# lengthens the critical path for unrelated changes.
+# temporal-rift-browser-e2e) and of security-e2e.yml.
+#
+# Unlike system-e2e.yml and security-e2e.yml, this does NOT run on every pull_request: a full
+# Chromium install, sibling game-client build, and complete multi-round game lifecycle make it far
+# slower than either. It runs only when a PR carries the `run-browser-e2e` label (add the label, or
+# re-push once it's already there, to opt that PR in), via manual workflow_dispatch, or via another
+# workflow's workflow_call.
 #
 # Needs a fourth sibling checkout system-e2e.yml does not: game-client, whose static bundle this
 # deployment serves (see compose.playtest.yml's own documented prerequisite).
@@ -45,8 +50,7 @@ on:
         type: string
         default: ''
   pull_request:
-  push:
-    branches: [ main ]
+    types: [ opened, synchronize, reopened, labeled ]
 
 permissions:
   contents: read
@@ -62,6 +66,10 @@ jobs:
     name: browser-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # Every pull_request event reaches this job (see the `types` list above, needed so a label
+    # added after the PR is open still triggers a run) but only actually executes it when the PR
+    # carries the opt-in label, or the run came from workflow_dispatch/workflow_call instead.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-browser-e2e')
 
     steps:
       - name: Validate service/ref inputs
