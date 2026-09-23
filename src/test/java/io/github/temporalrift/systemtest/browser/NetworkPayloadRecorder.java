@@ -20,11 +20,11 @@ final class NetworkPayloadRecorder {
 
     static NetworkPayloadRecorder attachedTo(Page page) {
         var recorder = new NetworkPayloadRecorder();
-        page.onResponse(recorder::record);
+        page.onResponse(recorder::capture);
         return recorder;
     }
 
-    private void record(Response response) {
+    private void capture(Response response) {
         String requestBody;
         try {
             requestBody = response.request().postData();
