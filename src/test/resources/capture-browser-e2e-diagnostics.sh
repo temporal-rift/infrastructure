@@ -5,15 +5,12 @@
 #
 # Bundles Compose logs/container state alongside every scenario's Playwright trace/screenshot
 # (already written under target/browser-e2e-traces by the test JVM itself) into one directory, and
-# fails loudly if anything bundled looks like it carries a bearer token or signing secret -- a
-# credential in a diagnostics artifact is exactly the kind of incidental leak Rule Zero-style
-# carelessness produces, so this is checked mechanically rather than trusted by inspection.
+# redacts bearer tokens and signed JWTs before publishing. A private key or any remaining token
+# causes the capture to fail, so a credential cannot be uploaded by accident.
 #
 # Everything is assembled in a staging directory first and only copied into the published
 # target_dir -- the exact path the CI workflow's `if: failure()` step uploads -- once the check
-# passes. A failed check leaves target_dir empty: this script still exits nonzero either way (the
-# real failure is worth investigating from the job's own log output), but the bundle it just
-# refused is never the one that gets uploaded.
+# passes. A failed check leaves target_dir empty.
 set -u
 
 # Overridable so scripts/test-capture-browser-e2e-diagnostics.sh can exercise the bundling and
@@ -58,13 +55,21 @@ if [ -f "$manifest_file" ]; then
   cp "$manifest_file" "$staging_dir/manifest.json" 2>/dev/null || true
 fi
 
-# A bearer token, a raw JWT (the mock issuer's token endpoint returns signed JWTs as bare
-# `access_token`/`id_token` values with no `Bearer` prefix), or a private key ever showing up
-# in a bundled diagnostics file is a defect in this script, not an acceptable diagnostic
-# detail -- fail the step instead of silently uploading it. Plain grep skips binary files by
-# default, which would leave the bundled Playwright trace .zip archives entirely unchecked even
-# though they are part of the artifact -- so their contents are extracted and scanned too, not
-# just their file names.
+# Redact tokens in both plain files and archived Playwright trace entries while retaining the
+# surrounding diagnostics. Refuse private keys and verify the redacted output below. Plain grep
+# skips binary files, so the final check scans the contents of every trace archive too.
+python_bin=""
+for candidate in python3 python; do
+  if "$candidate" --version >/dev/null 2>&1; then
+    python_bin="$candidate"
+    break
+  fi
+done
+if [ -z "$python_bin" ] || ! "$python_bin" "$repo_root/scripts/redact-browser-e2e-diagnostics.py" "$staging_dir"; then
+  echo "capture-browser-e2e-diagnostics: could not redact the staged diagnostics." >&2
+  exit 1
+fi
+
 credential_pattern='(Bearer [A-Za-z0-9._-]{20,}|([A-Za-z0-9_-]{10,}\.){2}[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
 grep -rIlE "$credential_pattern" "$staging_dir" >"$flagged_files" 2>/dev/null || true
 
