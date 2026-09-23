@@ -64,7 +64,9 @@ jobs:
   browser-e2e:
     name: browser-e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Temporarily short while this rewrite is still being debugged -- a hang shouldn't burn 45
+    # minutes to discover. Raise once a real run's actual duration is known.
+    timeout-minutes: 15
     # Every pull_request event reaches this job (see the `types` list above, needed so a label
     # added after the PR is open still triggers a run) but only actually executes it when the PR
     # carries the opt-in label, or the run came from workflow_dispatch/workflow_call instead.
@@ -160,13 +162,25 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Bring up the browser-e2e deployment
+        id: up
         working-directory: infrastructure
         env:
           GAME_SERVICE_TAG: ${{ steps.build.outputs.game_service_tag }}
           TIMELINE_SERVICE_TAG: ${{ steps.build.outputs.timeline_service_tag }}
           READ_SERVICE_TAG: ${{ steps.build.outputs.read_service_tag }}
           WEB_CLIENT_TAG: ${{ steps.build.outputs.web_client_tag }}
-        run: docker compose -f docker-compose.e2e.yml up -d --build
+        # --wait blocks here until every started service reaches its target condition (healthy, or
+        # completed for one-shots) and fails this step with a clear message naming which one
+        # didn't -- without it, `up -d` returns as soon as containers merely start, and any real
+        # problem only surfaces later, opaquely, inside `run --rm e2e-tests`.
+        run: docker compose -f docker-compose.e2e.yml up -d --build --wait --wait-timeout 300
+
+      - name: Show container status
+        if: failure() && steps.up.outcome == 'failure'
+        working-directory: infrastructure
+        run: |
+          docker compose -f docker-compose.e2e.yml ps --all
+          docker compose -f docker-compose.e2e.yml logs --no-color --timestamps --tail=200
 
       - name: Run browser E2E
         id: test
