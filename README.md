@@ -457,5 +457,8 @@ checking out `game-client` alongside the three services the way `system-e2e.yml`
 uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace) on
   failure only — bearer tokens and JWTs are redacted from logs and trace archives, then the bundle is checked for
   remaining credentials before it is written.
+  Unlike `system-e2e.yml`/`security-e2e.yml`, this workflow does not run on every pull request — a full Chromium
+  install plus a complete multi-round game lifecycle makes it too slow for that. It runs only on a pull request
+  carrying the `run-browser-e2e` label, via manual `workflow_dispatch`, or via another workflow's `workflow_call`.
   The test harness creates a short-lived HTTPS certificate for the interactive issuer and a matching Java truststore
   for the three services. Chromium accepts the certificate inside its isolated test contexts.
