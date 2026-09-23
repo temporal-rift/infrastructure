@@ -203,6 +203,15 @@ sed 's#proxy_pass http://playtest-game;#proxy_pass http://playtest-game;\n    pr
 PLAYTEST_NGINX_CONF="$diagnostic_root/nginx.conf" assert_failure_contains "must not proxy diagnostic" \
   run_validator "$diagnostic_root"
 
+# The exact readiness route must use an internal health check rather than
+# returning success unconditionally or proxying the upstream diagnostic body.
+readiness_root="$fixtures_dir/readiness"
+setup_valid_deployment "$readiness_root"
+sed 's#auth_request /_gameplay_health;#return 200;#' \
+  "$repo_root/playtest/nginx.conf" > "$readiness_root/nginx.conf"
+PLAYTEST_NGINX_CONF="$readiness_root/nginx.conf" assert_failure_contains "must gate the exact client readiness path" \
+  run_validator "$readiness_root"
+
 # A generic ^~ /api/ route would shadow the service-specific regex routes.
 shadow_root="$fixtures_dir/shadow"
 setup_valid_deployment "$shadow_root"

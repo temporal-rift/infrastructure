@@ -63,6 +63,7 @@ services:
     volumes:
       - ../game-client/dist:/usr/share/nginx/html:ro
       - ./playtest/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./playtest/readiness.json:/etc/nginx/readiness.json:ro
       - "${PLAYTEST_TLS_CERT:?PLAYTEST_TLS_CERT must be set to the playtest TLS certificate file}:/etc/nginx/tls/cert.pem:ro"
       - "${PLAYTEST_TLS_KEY:?PLAYTEST_TLS_KEY must be set to the playtest TLS key file}:/etc/nginx/tls/key.pem:ro"
     depends_on:
