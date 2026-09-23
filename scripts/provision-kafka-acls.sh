@@ -1,7 +1,7 @@
 #!/bin/bash
 # Grants each service identity exactly the topic and consumer-group ACLs its own code actually
 # uses (verified against the real @KafkaListener annotations and producers in game-service,
-# timeline-service, and read-service — not the aspirational tables in event-schema.md). No
+# timeline-service, and read-service). No
 # principal receives a wildcard grant, and no principal receives an operation it doesn't perform:
 #
 #   game-service      produce game.events, timeline.events.dlq, game.commands.dlq
