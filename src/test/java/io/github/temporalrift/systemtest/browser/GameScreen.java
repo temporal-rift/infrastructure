@@ -1,6 +1,7 @@
 package io.github.temporalrift.systemtest.browser;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import com.microsoft.playwright.Locator;
@@ -32,8 +33,10 @@ final class GameScreen {
     // block for 30s and throw TimeoutError, aborting the whole poll instead of just failing this one
     // tick. safeInnerText/safeIsEnabled catch exactly that timeout and report "not ready yet".
     private static final int PROBE_TIMEOUT_MS = 2000;
+    private static final long RESULTS_REFRESH_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(10);
 
     private final Page page;
+    private long lastResultsRefreshNanos;
 
     GameScreen(Page page) {
         this.page = page;
@@ -202,7 +205,7 @@ final class GameScreen {
     }
 
     String currentFaction() {
-        return safeInnerText(page.getByLabel("Your faction").locator("strong"));
+        return safeInnerText(page.locator("[aria-label='Your faction'] strong"));
     }
 
     private void resolveTargetIfPresent(Locator section) {
@@ -297,14 +300,20 @@ final class GameScreen {
     }
 
     boolean hasCompleteResults() {
-        return resultsSection().getByLabel("Winners").count() > 0;
+        return resultsSection().getByLabel("Final scores").count() > 0;
     }
 
     boolean canRefreshResults() {
-        return refreshResultsButton().count() > 0;
+        if (lastResultsRefreshNanos != 0
+                && System.nanoTime() - lastResultsRefreshNanos < RESULTS_REFRESH_INTERVAL_NANOS) {
+            return false;
+        }
+        var button = refreshResultsButton();
+        return button.count() > 0 && safeIsEnabled(button);
     }
 
     void refreshResults() {
+        lastResultsRefreshNanos = System.nanoTime();
         refreshResultsButton().click();
     }
 
@@ -313,8 +322,8 @@ final class GameScreen {
                 .getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName(Pattern.compile("Refresh results")));
     }
 
-    List<String> winnerNames() {
-        return resultsSection().getByLabel("Winners").locator("li strong").allInnerTexts();
+    int finalScoreCount() {
+        return resultsSection().getByLabel("Final scores").locator("li").count();
     }
 
     // --- Knowledge (earned intel) ------------------------------------------
