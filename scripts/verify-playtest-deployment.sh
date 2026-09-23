@@ -147,16 +147,18 @@ fi
 # actuator payload. The internal subrequest is unreachable from a browser.
 readiness_block="$(sed -n '\#location = /actuator/health {#,/^[[:space:]]*}/p' "$nginx_conf")"
 internal_health_block="$(sed -n '\#location = /_gameplay_health {#,/^[[:space:]]*}/p' "$nginx_conf")"
-echo "$readiness_block" | grep -q 'auth_request /_gameplay_health;' \
+# Anchored to the start of the (optionally indented) line so a directive commented out with a
+# leading '#' can never satisfy these checks the way a plain substring grep would.
+echo "$readiness_block" | grep -Eq '^[[:space:]]*auth_request[[:space:]]+/_gameplay_health;[[:space:]]*$' \
   || fail "$nginx_conf must gate the exact client readiness path on backend health."
-echo "$readiness_block" | grep -q 'try_files /readiness.json =503;' \
+echo "$readiness_block" | grep -Eq '^[[:space:]]*try_files[[:space:]]+/readiness\.json[[:space:]]+=503;[[:space:]]*$' \
   || fail "$nginx_conf must serve only the fixed client readiness response."
 if echo "$readiness_block" | grep -q 'proxy_pass'; then
   fail "$nginx_conf must not return the upstream actuator payload to players."
 fi
-echo "$internal_health_block" | grep -q 'internal;' \
+echo "$internal_health_block" | grep -Eq '^[[:space:]]*internal;[[:space:]]*$' \
   || fail "$nginx_conf must keep the backend health subrequest internal."
-echo "$internal_health_block" | grep -q 'proxy_pass http://playtest-game/actuator/health;' \
+echo "$internal_health_block" | grep -Eq '^[[:space:]]*proxy_pass[[:space:]]+http://playtest-game/actuator/health;[[:space:]]*$' \
   || fail "$nginx_conf must check game-service health before reporting readiness."
 [[ -f "$repo_root/playtest/readiness.json" ]] \
   || fail "fixed client readiness response is missing."
