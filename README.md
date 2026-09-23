@@ -441,7 +441,7 @@ system-e2e harness already documents as lacking a complete production path.
   - `docker`, `openssl`, Java 26 `keytool`, and (on Linux) passwordless `sudo` to add a one-line hosts-file alias its interactive mock
   OIDC issuer needs — see `compose.browser-e2e.yml` for why a genuinely interactive issuer, unlike the command-only
   harness's static `e2e-auth`, is required, and why the alias must resolve identically on the host and inside the
-  Compose network.
+  Compose network — and (also on Linux) to install Chromium's host OS dependencies via apt.
 
 ### Run
 

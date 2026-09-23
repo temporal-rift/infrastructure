@@ -8,7 +8,8 @@
 # Usage: bash scripts/start-browser-e2e-stack.sh
 #
 # Requires: docker compose v2.24.4+, openssl, Java 26 keytool, a sibling game-client checkout with Node available,
-# and (on Linux) passwordless sudo to add the one-line hosts-file alias below.
+# and (on Linux) passwordless sudo to add the one-line hosts-file alias below and to install Chromium's
+# host OS dependencies.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,6 +52,18 @@ echo "Installing Playwright's Chromium browser..."
   -Dexec.mainClass=com.microsoft.playwright.CLI \
   -Dexec.classpathScope=test \
   -Dexec.args="install chromium")
+
+echo "Installing Chromium's host OS dependencies..."
+# `install chromium` above only downloads the browser binary -- without this, browser.launch() fails
+# at test time with "Host system is missing dependencies to run browsers" on any runner that doesn't
+# already have Chromium's shared libraries preinstalled (GitHub Actions' ubuntu-latest doesn't).
+# install-deps shells out to apt-get, which needs root; HOME/PATH/JAVA_HOME are passed through
+# explicitly so the sudo'd mvn reuses this same user's already-resolved ~/.m2 cache instead of
+# re-resolving everything as root.
+(cd "$repo_root" && sudo env "HOME=$HOME" "PATH=$PATH" "JAVA_HOME=$JAVA_HOME" mvn --batch-mode --quiet exec:java \
+  -Dexec.mainClass=com.microsoft.playwright.CLI \
+  -Dexec.classpathScope=test \
+  -Dexec.args="install-deps chromium")
 
 echo "Ensuring ${issuer_host} resolves locally for the interactive mock issuer..."
 hosts_marker="$tls_dir/.hosts-entry-added"
