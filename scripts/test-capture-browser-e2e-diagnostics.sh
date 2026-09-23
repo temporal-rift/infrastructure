@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Fixture tests for src/test/resources/capture-browser-e2e-diagnostics.sh's credential-redaction
-# check: one clean bundle that must pass, one poisoned bundle per credential shape that must fail
-# the capture step rather than silently publish it. Runs without Docker, a browser, or a real
+# Fixture tests for src/test/resources/capture-browser-e2e-diagnostics.sh's credential handling:
+# bearer tokens and JWTs must be redacted, and private keys must block publication. Runs without Docker, a browser, or a real
 # Compose project (BROWSER_E2E_SKIP_DOCKER=1). Mirrors the style of test-verify-playtest-deployment.sh.
 set -euo pipefail
 
@@ -52,13 +51,17 @@ echo "trace summary: 3 scenarios, 0 failures" > "$clean_root/traces/summary.txt"
 expect_pass "a clean diagnostics bundle is published" run_capture "$clean_root"
 [ -f "$clean_root/out/playwright-traces/summary.txt" ] || { echo "FAIL: clean bundle did not copy the traces directory"; failures=$((failures + 1)); }
 
-# --- A bearer token anywhere in a captured file must fail the capture step. ---
+# --- A bearer token in a plain captured file must be removed before publication. ---
 token_root="$fixtures_dir/token"
 mkdir -p "$token_root/traces"
 echo '{"ok":true}' > "$token_root/manifest.json"
 echo "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz.signature" > "$token_root/traces/leak.txt"
-expect_fail "a bundle containing a bearer token is refused" run_capture "$token_root"
-[ ! -e "$token_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
+expect_pass "a bearer token is redacted" run_capture "$token_root"
+if ! grep -qF '[REDACTED CREDENTIAL]' "$token_root/out/playwright-traces/leak.txt" ||
+  grep -qF 'eyJhbGci' "$token_root/out/playwright-traces/leak.txt"; then
+  echo "FAIL: the published bearer token fixture was not redacted"
+  failures=$((failures + 1))
+fi
 
 # --- A PEM private key anywhere in a captured file must fail the capture step. ---
 key_root="$fixtures_dir/key"
@@ -69,8 +72,7 @@ printf -- '-----BEGIN PRIVATE KEY-----\nMIIBVgIBADANBgkqhkiG9w0BAQEFAASCAT8wggE7
 expect_fail "a bundle containing a private key is refused" run_capture "$key_root"
 [ ! -e "$key_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
 
-# --- A credential inside a Playwright trace .zip archive (not just plain text files) must also
-# fail the capture step: plain grep skips binary files and would otherwise miss it entirely. ---
+# --- A credential inside a Playwright trace .zip archive must be redacted without corrupting the archive. ---
 zip_root="$fixtures_dir/zip"
 mkdir -p "$zip_root/traces"
 echo '{"ok":true}' > "$zip_root/manifest.json"
@@ -87,18 +89,27 @@ done
 "$python_bin" -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1], 'w').write(sys.argv[2], 'trace.trace')" \
   "$zip_root/traces/host-123.zip" "$zip_workdir/trace.trace"
 rm -rf "$zip_workdir"
-expect_fail "a bundle whose trace archive contains a bearer token is refused" run_capture "$zip_root"
-[ ! -e "$zip_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
+expect_pass "a trace archive's bearer token is redacted" run_capture "$zip_root"
+if ! unzip -t "$zip_root/out/playwright-traces/host-123.zip" >/dev/null ||
+  ! unzip -p "$zip_root/out/playwright-traces/host-123.zip" trace.trace | grep -qF '[REDACTED CREDENTIAL]' ||
+  unzip -p "$zip_root/out/playwright-traces/host-123.zip" trace.trace | grep -qF 'eyJhbGci'; then
+  echo "FAIL: the redacted trace archive is invalid or still contains its token"
+  failures=$((failures + 1))
+fi
 
 # --- A raw JWT (mock issuer token responses carry bare access_token/id_token values with no
-# `Bearer` prefix) must also fail the capture step. ---
+# `Bearer` prefix) must also be removed. ---
 raw_jwt_root="$fixtures_dir/raw-jwt"
 mkdir -p "$raw_jwt_root/traces"
 echo '{"ok":true}' > "$raw_jwt_root/manifest.json"
 echo "eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz.signature0" \
   > "$raw_jwt_root/traces/leak.txt"
-expect_fail "a bundle containing a raw JWT is refused" run_capture "$raw_jwt_root"
-[ ! -e "$raw_jwt_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
+expect_pass "a raw JWT is redacted" run_capture "$raw_jwt_root"
+if ! grep -qF '[REDACTED CREDENTIAL]' "$raw_jwt_root/out/playwright-traces/leak.txt" ||
+  grep -qF 'eyJhbGci' "$raw_jwt_root/out/playwright-traces/leak.txt"; then
+  echo "FAIL: the published raw JWT fixture was not redacted"
+  failures=$((failures + 1))
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures fixture check(s) failed."

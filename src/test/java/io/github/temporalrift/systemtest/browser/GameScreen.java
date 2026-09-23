@@ -101,37 +101,26 @@ final class GameScreen {
     }
 
     // --- Seven-to-five hand keep -----------------------------------------
-    //
-    // Speculative: no hand-keep UI exists on game-client's main branch at the time this suite was
-    // written (tracked separately by game-client#7, open with an unmerged PR). Written against
-    // that issue's stated contract — an owner-private seven-card offer confirmed down to exactly
-    // five — using the same accessible-section convention every other panel in this app follows.
-    // If the merged component uses different labels, this method (and only this method) needs a
-    // matching update; every other page-object method here targets already-merged, verified markup.
-
-    private static final Pattern KEEP_FIVE_LABEL = Pattern.compile("keep|hand selection", Pattern.CASE_INSENSITIVE);
 
     boolean isHandKeepOffered() {
-        return page.getByRole(AriaRole.LISTITEM).locator("button").count() > 0
-                && findHandKeepSection().count() > 0;
+        var section = handSelectionSection();
+        return section.getByLabel("Private card offer").locator("li button").count() > 0
+                && section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm five cards"))
+                                .count()
+                        > 0;
     }
 
-    private Locator findHandKeepSection() {
-        return page.locator("section").filter(new Locator.FilterOptions().setHasText(KEEP_FIVE_LABEL));
+    private Locator handSelectionSection() {
+        return page.getByLabel("Hand selection");
     }
 
     void keepFirstFiveOfferedCards() {
-        var section = findHandKeepSection().first();
-        var cards =
-                section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName(Pattern.compile("Grade")));
-        int toSelect = Math.min(5, cards.count());
-        for (int i = 0; i < toSelect; i++) {
+        var section = handSelectionSection();
+        var cards = section.getByLabel("Private card offer").locator("li button");
+        for (int i = 0; i < 5; i++) {
             cards.nth(i).click();
         }
-        section.getByRole(
-                        AriaRole.BUTTON,
-                        new Locator.GetByRoleOptions()
-                                .setName(Pattern.compile("Confirm|Keep", Pattern.CASE_INSENSITIVE)))
+        section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm five cards"))
                 .click();
     }
 

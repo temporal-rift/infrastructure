@@ -455,6 +455,7 @@ deployment under Compose project `temporal-rift-browser-e2e` (distinct from `tem
 suite, and tears down only its own project. `.github/workflows/browser-e2e.yml` runs the same command in CI,
 checking out `game-client` alongside the three services the way `system-e2e.yml` already does for those three, and
 uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace) on
-  failure only — mechanically checked to never contain a bearer token or signing key before it is written.
+  failure only — bearer tokens and JWTs are redacted from logs and trace archives, then the bundle is checked for
+  remaining credentials before it is written.
   The test harness creates a short-lived HTTPS certificate for the interactive issuer and a matching Java truststore
   for the three services. Chromium accepts the certificate inside its isolated test contexts.
