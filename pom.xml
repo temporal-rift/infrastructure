@@ -344,68 +344,15 @@
             <!-- Real-browser evidence (infrastructure#47) that a complete normal game is playable
                  end to end through the deployed client, with isolated separately authenticated
                  player sessions — the browser counterpart of the `e2e` profile's command-only
-                 proof. Boots the isolated playtest deployment (compose.playtest.yml) plus a
-                 dedicated interactive mock OIDC issuer under its own project name,
-                 temporal-rift-browser-e2e, so it never disturbs `temporal-rift-e2e`,
-                 `temporal-rift-playtest`, or a developer's own dev stack. See design.md for why a
-                 genuinely interactive issuer (not e2e's static `e2e-auth`) is required. -->
+                 proof. Runs as the `e2e-tests` service in docker-compose.e2e.yml, which owns the
+                 entire deployment's lifecycle (start, run, teardown) — this profile no longer
+                 provisions or tears down anything itself; it only runs the Failsafe ITs against
+                 whatever docker-compose.e2e.yml already brought up. See README.md's browser-e2e
+                 section for the two-command contract (docker compose up, then docker compose
+                 run e2e-tests). -->
             <id>browser-e2e</id>
             <build>
                 <plugins>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>exec-maven-plugin</artifactId>
-                        <version>${maven.exec.version}</version>
-                        <executions>
-                            <execution>
-                                <id>start-browser-e2e-stack</id>
-                                <phase>pre-integration-test</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <executable>bash</executable>
-                                    <workingDirectory>${project.basedir}</workingDirectory>
-                                    <arguments>
-                                        <argument>scripts/start-browser-e2e-stack.sh</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <!-- Must be declared before stop-browser-e2e-stack: both bind to
-                                     post-integration-test, and same-phase executions of one plugin
-                                     run in POM declaration order. Captures diagnostics while the
-                                     stack still exists, matching the e2e/security-e2e profiles'
-                                     precedent. -->
-                                <id>capture-browser-e2e-diagnostics</id>
-                                <phase>post-integration-test</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <executable>sh</executable>
-                                    <workingDirectory>${project.basedir}</workingDirectory>
-                                    <arguments>
-                                        <argument>src/test/resources/capture-browser-e2e-diagnostics.sh</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <id>stop-browser-e2e-stack</id>
-                                <phase>post-integration-test</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <executable>bash</executable>
-                                    <workingDirectory>${project.basedir}</workingDirectory>
-                                    <arguments>
-                                        <argument>scripts/stop-browser-e2e-stack.sh</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
                     <plugin>
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-failsafe-plugin</artifactId>
@@ -420,9 +367,12 @@
                                         <include>**/browser/*IT.java</include>
                                     </includes>
                                     <systemPropertyVariables>
-                                        <!-- Playwright traces per scenario, bundled by
-                                             capture-browser-e2e-diagnostics.sh on failure. -->
-                                        <browserE2e.tracesDir>${project.basedir}/target/browser-e2e-traces</browserE2e.tracesDir>
+                                        <!-- Set by docker-compose.e2e.yml's e2e-tests service; not
+                                             browserE2e.* directly since Compose `environment:` sets
+                                             OS env vars, not JVM system properties. -->
+                                        <browserE2e.clientOrigin>${env.BROWSER_E2E_CLIENT_ORIGIN}</browserE2e.clientOrigin>
+                                        <browserE2e.manifestPath>${env.BROWSER_E2E_MANIFEST_PATH}</browserE2e.manifestPath>
+                                        <browserE2e.tracesDir>${env.BROWSER_E2E_TRACES_DIR}</browserE2e.tracesDir>
                                     </systemPropertyVariables>
                                 </configuration>
                             </execution>

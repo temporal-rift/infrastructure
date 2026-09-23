@@ -1,19 +1,18 @@
 name: Browser E2E
 
-# Runs the real-browser deployed-play proof (`mvn verify -Pbrowser-e2e`, infrastructure#47): isolated,
-# separately authenticated Playwright browser contexts driving the actual game-client bundle against
-# the isolated playtest deployment topology (infrastructure#46), under accelerated, explicitly
-# labeled test-override timing. Independent of system-e2e.yml (its own Compose project,
-# temporal-rift-browser-e2e) and of security-e2e.yml.
+# Runs the real-browser deployed-play proof (docker-compose.e2e.yml, infrastructure#47): isolated,
+# separately authenticated Playwright browser contexts driving the actual game-client bundle
+# against a declarative Compose deployment of the whole system under test, under accelerated,
+# explicitly labeled test-override timing. Independent of system-e2e.yml and security-e2e.yml.
 #
-# Unlike system-e2e.yml and security-e2e.yml, this does NOT run on every pull_request: a full
-# Chromium install, sibling game-client build, and complete multi-round game lifecycle make it far
-# slower than either. It runs only when a PR carries the `run-browser-e2e` label (add the label, or
-# re-push once it's already there, to opt that PR in), via manual workflow_dispatch, or via another
-# workflow's workflow_call.
+# Unlike system-e2e.yml and security-e2e.yml, this does NOT run on every pull_request: building
+# five container images and a complete multi-round game lifecycle make it far slower than either.
+# It runs only when a PR carries the `run-browser-e2e` label (add the label, or re-push once it's
+# already there, to opt that PR in), via manual workflow_dispatch, or via another workflow's
+# workflow_call.
 #
-# Needs a fourth sibling checkout system-e2e.yml does not: game-client, whose static bundle this
-# deployment serves (see compose.playtest.yml's own documented prerequisite).
+# Needs a fourth sibling checkout system-e2e.yml does not: game-client, whose image this
+# deployment serves as web-client.
 
 on:
   workflow_call:
@@ -56,8 +55,8 @@ permissions:
   contents: read
 
 concurrency:
-  # One browser proof at a time per triggering ref — the run holds fixed host ports (see
-  # compose.browser-e2e.yml) and adds a one-line hosts-file alias.
+  # One browser proof at a time per triggering ref -- the deployment holds a fixed Compose project
+  # name and network aliases.
   group: browser-e2e-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: true
 
@@ -130,7 +129,7 @@ jobs:
         env:
           INPUT_SERVICE: ${{ inputs.service }}
 
-      - name: Verify Docker Compose supports the playtest override
+      - name: Verify Docker Compose supports the depends_on model this deployment uses
         run: |
           version="$(docker compose version --short)"
           echo "docker compose $version"
@@ -140,33 +139,52 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Node
-        uses: actions/setup-node@8f152de45cc393bb48ce5d89d36b731f54556e65 # v5
-        with:
-          node-version-file: game-client/package.json
+      - name: Build service images
+        id: build
+        run: |
+          game_service_tag="$(git -C game-service rev-parse --short HEAD)"
+          timeline_service_tag="$(git -C timeline-service rev-parse --short HEAD)"
+          read_service_tag="$(git -C read-service rev-parse --short HEAD)"
+          web_client_tag="$(git -C game-client rev-parse --short HEAD)"
 
-      - name: Setup Maven Action
-        uses: s4u/setup-maven-action@ba34de01b7f4ba2ab8e2860df8993a29f4477056 # v1.20.0
-        with:
-          java-version: 26
-          java-distribution: temurin
-          maven-version: 3.9.13
-          settings-githubServer: false
-          checkout-enabled: false
+          docker build -t "temporal-rift/game-service:${game_service_tag}" ./game-service
+          docker build -t "temporal-rift/timeline-service:${timeline_service_tag}" ./timeline-service
+          docker build -t "temporal-rift/read-service:${read_service_tag}" ./read-service
+          docker build -t "temporal-rift/web-client:${web_client_tag}" ./game-client
 
-      - name: Cache Maven packages
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-browser-e2e-${{ hashFiles('infrastructure/pom.xml') }}
-          restore-keys: ${{ runner.os }}-m2-browser-e2e-
+          {
+            echo "game_service_tag=${game_service_tag}"
+            echo "timeline_service_tag=${timeline_service_tag}"
+            echo "read_service_tag=${read_service_tag}"
+            echo "web_client_tag=${web_client_tag}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Bring up the browser-e2e deployment
+        working-directory: infrastructure
+        env:
+          GAME_SERVICE_TAG: ${{ steps.build.outputs.game_service_tag }}
+          TIMELINE_SERVICE_TAG: ${{ steps.build.outputs.timeline_service_tag }}
+          READ_SERVICE_TAG: ${{ steps.build.outputs.read_service_tag }}
+          WEB_CLIENT_TAG: ${{ steps.build.outputs.web_client_tag }}
+        run: docker compose -f docker-compose.e2e.yml up -d --build
 
       - name: Run browser E2E
+        id: test
         working-directory: infrastructure
-        run: mvn --batch-mode verify -Pbrowser-e2e
+        env:
+          GAME_SERVICE_TAG: ${{ steps.build.outputs.game_service_tag }}
+          TIMELINE_SERVICE_TAG: ${{ steps.build.outputs.timeline_service_tag }}
+          READ_SERVICE_TAG: ${{ steps.build.outputs.read_service_tag }}
+          WEB_CLIENT_TAG: ${{ steps.build.outputs.web_client_tag }}
+        run: docker compose -f docker-compose.e2e.yml run --rm e2e-tests
+
+      - name: Capture diagnostics
+        if: failure() && steps.test.outcome == 'failure'
+        working-directory: infrastructure
+        run: bash scripts/capture-browser-e2e-diagnostics.sh
 
       - name: Upload diagnostics
-        if: failure()
+        if: failure() && steps.test.outcome == 'failure'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: browser-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
@@ -174,10 +192,12 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      # Failsafe's post-integration-test teardown does not run if the job is cancelled or the JVM
-      # dies. Scoped to the `temporal-rift-browser-e2e` project name, so it removes exactly what
-      # this run created and cannot touch system-e2e's or security-e2e's stacks.
-      - name: Tear down browser-e2e stack
+      - name: Tear down the browser-e2e deployment
         if: always()
         working-directory: infrastructure
-        run: bash scripts/stop-browser-e2e-stack.sh
+        env:
+          GAME_SERVICE_TAG: ${{ steps.build.outputs.game_service_tag || 'unused' }}
+          TIMELINE_SERVICE_TAG: ${{ steps.build.outputs.timeline_service_tag || 'unused' }}
+          READ_SERVICE_TAG: ${{ steps.build.outputs.read_service_tag || 'unused' }}
+          WEB_CLIENT_TAG: ${{ steps.build.outputs.web_client_tag || 'unused' }}
+        run: docker compose -f docker-compose.e2e.yml down -v
