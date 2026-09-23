@@ -36,7 +36,7 @@ final class GameScreen {
     private static String safeInnerText(Locator locator) {
         try {
             return locator.innerText(new Locator.InnerTextOptions().setTimeout(PROBE_TIMEOUT_MS));
-        } catch (TimeoutError timeout) {
+        } catch (TimeoutError _) {
             return "";
         }
     }
@@ -44,7 +44,7 @@ final class GameScreen {
     private static boolean safeIsEnabled(Locator locator) {
         try {
             return locator.isEnabled(new Locator.IsEnabledOptions().setTimeout(PROBE_TIMEOUT_MS));
-        } catch (TimeoutError timeout) {
+        } catch (TimeoutError _) {
             return false;
         }
     }
