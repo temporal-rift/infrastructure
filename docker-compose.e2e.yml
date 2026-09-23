@@ -1,0 +1,381 @@
+name: temporal-rift-browser-e2e
+
+# Declarative, self-contained browser-e2e deployment (infrastructure#47 rewrite): every component
+# of the system under test, plus the Playwright test runner itself, as Compose services on one
+# network. Local dev and CI both run the same two commands (see README.md):
+#
+#   docker compose -f docker-compose.e2e.yml up -d --build
+#   docker compose -f docker-compose.e2e.yml run --rm e2e-tests
+#
+# followed unconditionally by:
+#
+#   docker compose -f docker-compose.e2e.yml down -v
+#
+# Not a single `up --abort-on-container-exit --exit-code-from e2e-tests`: that flag combination
+# stops the whole stack the moment ANY container exits, including the one-shot init services below
+# succeeding on purpose.
+#
+# Application services (game-service, timeline-service, read-service, web-client) are consumed via
+# pinned image tags, not built here -- this file assembles a deployment, it does not compile the
+# microservices. Build and tag them before running `up`.
+
+services:
+  # --- Init layer: one-shot, must complete before the system under test starts ---
+
+  kafka-topics:
+    image: apache/kafka:3.7.0
+    volumes:
+      - ./scripts/provision-kafka-topics.sh:/scripts/provision-kafka-topics.sh:ro
+    entrypoint:
+      - /bin/bash
+      - /scripts/provision-kafka-topics.sh
+      - kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # PKI only -- see README.md for why this is deliberately not combined with manifest generation
+  # or readiness verification (different, unrelated responsibilities).
+  cert-init:
+    image: eclipse-temurin:25-jre-noble
+    volumes:
+      - ./scripts/generate-e2e-certs.sh:/scripts/generate-e2e-certs.sh:ro
+      - e2e-tls:/certs
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        apt-get update -qq && apt-get install -y -qq --no-install-recommends openssl >/dev/null
+        bash /scripts/generate-e2e-certs.sh /certs
+
+  # mock-oauth2-server (identity-provider, below) is a distroless Jib build with no shell, wget, or
+  # curl, so it cannot run a native Docker healthcheck. This polls its discovery endpoint from
+  # inside the network and exits once it responds, so dependents wait on real readiness instead of
+  # mere container start.
+  identity-provider-ready:
+    image: curlimages/curl:8.11.0
+    volumes:
+      - e2e-tls:/certs:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until curl --fail --silent --show-error --cacert /certs/issuer-cert.pem \
+            https://identity-provider:8080/default/.well-known/openid-configuration >/dev/null; do
+          sleep 1
+        done
+    depends_on:
+      identity-provider:
+        condition: service_started
+      cert-init:
+        condition: service_completed_successfully
+
+  # Generates the effective deployment manifest from the sibling service checkouts -- needs their
+  # pom.xml (contract version pins) and .git (commit SHA), which live outside any image this file
+  # builds, so it can't be baked into e2e-tests at build time. Mirrors CI's existing sibling-repo
+  # checkout layout.
+  playtest-manifest-init:
+    image: bash:5
+    volumes:
+      - ..:/workspace:ro
+      - ./config-server/config-repo:/workspace-config-repo:ro
+      - ./target/browser-e2e-manifest:/manifest
+    working_dir: /workspace/infrastructure
+    environment:
+      PLAYTEST_TIMING_PRESET: test-override
+      JWT_ISSUER_URI: https://auth.e2e.test
+      PLAYTEST_SERVICES_DIR: /workspace
+      PLAYTEST_CONFIG_REPO: /workspace-config-repo
+      PLAYTEST_CATALOG: /workspace/game-service/src/main/resources/future-events.yml
+      PLAYTEST_CLIENT_DIST: /workspace/game-client/dist
+    entrypoint:
+      - bash
+      - scripts/write-playtest-manifest.sh
+      - /manifest/manifest.json
+
+  # --- System under test ---
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: temporal_rift
+      POSTGRES_USER: temporal_rift
+      POSTGRES_PASSWORD: temporal_rift
+    # Ephemeral, torn down every run: trading crash-safety for speed is safe here in a way it would
+    # not be for any real deployment.
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    volumes:
+      - ../game-service/infrastructure/postgres/001-create-service-databases.sql:/docker-entrypoint-initdb.d/001-create-service-databases.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal_rift -d temporal_rift"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  kafka:
+    image: apache/kafka:3.7.0
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  config-server:
+    build:
+      context: ./config-server
+    volumes:
+      - ./config-server/config-repo:/config:ro
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8888/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  zipkin:
+    image: openzipkin/zipkin
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --spider http://localhost:9411/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:v1.52.0
+    command:
+      - "-syslog.listenAddr.tcp=:514"
+
+  # navikt/mock-oauth2-server: a genuinely interactive OIDC test issuer with a real login page,
+  # required for the browser to complete an actual redirect login. Network alias is the literal
+  # issuer value every side must agree on -- see README.md's OIDC section.
+  identity-provider:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    environment:
+      JSON_CONFIG: '{"interactiveLogin":true,"httpServer":{"type":"NettyWrapper","ssl":{"keyPassword":"browser-e2e","keystoreFile":"/tls/issuer-keystore.p12","keystorePassword":"browser-e2e","keystoreType":"PKCS12"}}}'
+    networks:
+      default:
+        aliases: [auth.e2e.test]
+    volumes:
+      - e2e-tls:/tls:ro
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+    # No healthcheck: distroless image, no shell/curl/wget available -- see identity-provider-ready.
+
+  game-service:
+    image: temporal-rift/game-service:${GAME_SERVICE_TAG:?GAME_SERVICE_TAG must be set to a built image tag}
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/game_service
+      SPRING_DATASOURCE_USERNAME: temporal_rift
+      SPRING_DATASOURCE_PASSWORD: temporal_rift
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      JWT_ISSUER_URI: https://auth.e2e.test
+      ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONSOLE_LOG_STRUCTURED_FORMAT: logstash
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/certs/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
+      # Bounded, explicitly labeled acceleration for this suite only -- real deployments never set
+      # this.
+      SPRING_APPLICATION_JSON: >-
+        {"game":{"rules":{"action-round-timer-seconds":{"3":15,"4":15,"5":15},
+          "hand-selection-timer-seconds":{"3":15,"4":15,"5":15},
+          "paradox-resolution-timer-seconds":15}}}
+    volumes:
+      - e2e-tls:/certs:ro
+    logging:
+      driver: syslog
+      options:
+        syslog-address: tcp://victorialogs:514
+        syslog-format: rfc5424
+        tag: game-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+      zipkin:
+        condition: service_healthy
+      victorialogs:
+        condition: service_started
+      config-server:
+        condition: service_healthy
+      identity-provider-ready:
+        condition: service_completed_successfully
+      cert-init:
+        condition: service_completed_successfully
+
+  timeline-service:
+    image: temporal-rift/timeline-service:${TIMELINE_SERVICE_TAG:?TIMELINE_SERVICE_TAG must be set to a built image tag}
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/timeline_service
+      SPRING_DATASOURCE_USERNAME: temporal_rift
+      SPRING_DATASOURCE_PASSWORD: temporal_rift
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      JWT_ISSUER_URI: https://auth.e2e.test
+      ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONSOLE_LOG_STRUCTURED_FORMAT: logstash
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/certs/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
+    volumes:
+      - e2e-tls:/certs:ro
+    logging:
+      driver: syslog
+      options:
+        syslog-address: tcp://victorialogs:514
+        syslog-format: rfc5424
+        tag: timeline-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+      zipkin:
+        condition: service_healthy
+      victorialogs:
+        condition: service_started
+      config-server:
+        condition: service_healthy
+      identity-provider-ready:
+        condition: service_completed_successfully
+      cert-init:
+        condition: service_completed_successfully
+
+  read-service:
+    image: temporal-rift/read-service:${READ_SERVICE_TAG:?READ_SERVICE_TAG must be set to a built image tag}
+    deploy:
+      replicas: 1
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/read_service
+      SPRING_DATASOURCE_USERNAME: temporal_rift
+      SPRING_DATASOURCE_PASSWORD: temporal_rift
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      JWT_ISSUER_URI: https://auth.e2e.test
+      ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      CONFIG_SERVER_URI: http://config-server:8888
+      CONSOLE_LOG_STRUCTURED_FORMAT: logstash
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/certs/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
+    volumes:
+      - e2e-tls:/certs:ro
+    logging:
+      driver: syslog
+      options:
+        syslog-address: tcp://victorialogs:514
+        syslog-format: rfc5424
+        tag: read-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-topics:
+        condition: service_completed_successfully
+      zipkin:
+        condition: service_healthy
+      victorialogs:
+        condition: service_started
+      config-server:
+        condition: service_healthy
+      identity-provider-ready:
+        condition: service_completed_successfully
+      cert-init:
+        condition: service_completed_successfully
+
+  # One-shot: renders window.__APP_CONFIG__ from env (same image, same entrypoint script as a real
+  # deployment would use to serve itself -- see game-client's Dockerfile/appConfig.ts) then copies
+  # its own built+configured static files into a volume gateway serves directly. Never a live
+  # network participant -- gateway proxying to a second nginx just to serve static files would be
+  # a redundant hop for every asset request.
+  web-client:
+    image: temporal-rift/web-client:${WEB_CLIENT_TAG:?WEB_CLIENT_TAG must be set to a built image tag}
+    environment:
+      APP_API_BASE_URL: https://app.e2e.test
+      APP_OIDC_ISSUER_URL: https://auth.e2e.test
+      APP_OIDC_CLIENT_ID: browser-e2e
+      APP_OIDC_AUDIENCE: https://app.e2e.test/api
+    entrypoint:
+      - /bin/sh
+      - -c
+      - /docker-entrypoint.d/40-render-runtime-config.sh && cp -a /usr/share/nginx/html/. /dist/
+    volumes:
+      - e2e-web-client-dist:/dist
+
+  gateway:
+    image: nginx:1.27-alpine
+    networks:
+      default:
+        aliases: [app.e2e.test]
+    volumes:
+      - ./browser-e2e/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./playtest/readiness.json:/etc/nginx/readiness.json:ro
+      - e2e-tls:/etc/nginx/tls:ro
+      - e2e-web-client-dist:/usr/share/nginx/html:ro
+    depends_on:
+      game-service:
+        condition: service_started
+      timeline-service:
+        condition: service_started
+      read-service:
+        condition: service_started
+      web-client:
+        condition: service_completed_successfully
+      cert-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate --quiet --spider https://127.0.0.1/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  # --- Test runner ---
+
+  e2e-tests:
+    build:
+      context: .
+      dockerfile: browser-e2e/Dockerfile
+    profiles: [test]
+    environment:
+      # Read via ${env.X} in pom.xml's failsafe systemPropertyVariables -- Compose `environment:`
+      # sets OS env vars, not JVM system properties, so these can't be the browserE2e.* property
+      # names directly.
+      BROWSER_E2E_CLIENT_ORIGIN: https://app.e2e.test
+      BROWSER_E2E_MANIFEST_PATH: /manifest/manifest.json
+      BROWSER_E2E_TRACES_DIR: /traces
+    volumes:
+      - ./target/browser-e2e-manifest:/manifest:ro
+      - ./target/browser-e2e-traces:/traces
+    depends_on:
+      game-service:
+        condition: service_started
+      timeline-service:
+        condition: service_started
+      read-service:
+        condition: service_started
+      # gateway's own service_healthy transitively covers web-client (gateway depends on
+      # web-client completing before it can start serving), so it isn't listed again here.
+      gateway:
+        condition: service_healthy
+      playtest-manifest-init:
+        condition: service_completed_successfully
+
+volumes:
+  e2e-tls:
+  e2e-web-client-dist:

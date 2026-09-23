@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Fixture tests for src/test/resources/capture-browser-e2e-diagnostics.sh's credential handling:
-# bearer tokens and JWTs must be redacted, and private keys must block publication. Runs without Docker, a browser, or a real
-# Compose project (BROWSER_E2E_SKIP_DOCKER=1). Mirrors the style of test-verify-playtest-deployment.sh.
+# Fixture tests for scripts/capture-browser-e2e-diagnostics.sh's credential handling: bearer
+# tokens and JWTs must be redacted, and private keys must block publication. Runs without Docker,
+# a browser, or a real Compose project (BROWSER_E2E_SKIP_DOCKER=1). Mirrors the style of
+# test-verify-playtest-deployment.sh.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-capture_script="$repo_root/src/test/resources/capture-browser-e2e-diagnostics.sh"
+capture_script="$repo_root/scripts/capture-browser-e2e-diagnostics.sh"
 
 fixtures_dir="$(mktemp -d)"
 trap 'rm -rf "$fixtures_dir"' EXIT
@@ -17,7 +18,7 @@ run_capture() {
     BROWSER_E2E_DIAGNOSTICS_DIR="$root/out" \
     BROWSER_E2E_TRACES_DIR="$root/traces" \
     BROWSER_E2E_MANIFEST="$root/manifest.json" \
-    sh "$capture_script"
+    bash "$capture_script"
 }
 
 failures=0

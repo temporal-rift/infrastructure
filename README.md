@@ -415,9 +415,16 @@ docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml 
 
 The command-only system E2E harness above proves cross-service behavior through direct HTTP commands; it never
 proves a human can actually complete a normal game through the real, deployed browser client with a genuinely
-separate authenticated session per player. The browser-e2e Maven profile (`temporal-rift-browser-e2e` Compose
-project) drives the isolated playtest deployment above with real, isolated Playwright browser contexts instead —
-one per player, each performing its own OIDC login — under accelerated, explicitly labeled test-override timing.
+separate authenticated session per player. `docker-compose.e2e.yml` declares a complete, self-contained deployment
+for this purpose — every backend service, the gateway, the identity provider, and the Playwright test runner itself
+as one more Compose service — and drives it with real, isolated Playwright browser contexts, one per player, each
+performing its own OIDC login, under accelerated, explicitly labeled test-override timing.
+
+Unlike the command-only harness and the real playtest deployment above, this suite does not reuse `compose.yml`/
+`compose.playtest.yml`: the browser (running inside the `e2e-tests` container) needs to reach every service by the
+same DNS names a real browser session would use, and its own test-runner container needs matched Playwright/Chromium
+OS dependencies that only the Playwright-vendor base image guarantees — `docker-compose.e2e.yml` is a self-contained
+declaration of that topology, not an overlay on the dev/playtest Compose files.
 
 Covered flows:
 
@@ -435,30 +442,45 @@ system-e2e harness already documents as lacking a complete production path.
 
 ### Prerequisites
 
-- Everything `compose.playtest.yml` requires (see above), plus a sibling `game-client` checkout with Node
-  available — this suite builds its static bundle itself against its own deployment, so no pre-built `dist/` is
-  needed beforehand.
-  - `docker`, `openssl`, Java 26 `keytool`, and (on Linux) passwordless `sudo` to add a one-line hosts-file alias its interactive mock
-  OIDC issuer needs — see `compose.browser-e2e.yml` for why a genuinely interactive issuer, unlike the command-only
-  harness's static `e2e-auth`, is required, and why the alias must resolve identically on the host and inside the
-  Compose network.
+- `docker` (Compose v2.24.4+), plus sibling `game-client`, `game-service`, `timeline-service`, and `read-service`
+  checkouts — each is built into its own image before the deployment starts (see Run below). No Node, Java, Maven,
+  or browser install needed on the host: the test runner is itself a Compose service, built from the pinned
+  official Playwright Java image, which already has matched Chromium OS dependencies.
 
 ### Run
 
+Build each application image, tagged by that checkout's commit, then bring up the deployment and run the suite as a
+one-off Compose service:
+
 ```bash
-mvn verify -Pbrowser-e2e
+export GAME_SERVICE_TAG=$(git -C ../game-service rev-parse --short HEAD)
+export TIMELINE_SERVICE_TAG=$(git -C ../timeline-service rev-parse --short HEAD)
+export READ_SERVICE_TAG=$(git -C ../read-service rev-parse --short HEAD)
+export WEB_CLIENT_TAG=$(git -C ../game-client rev-parse --short HEAD)
+
+docker build -t temporal-rift/game-service:$GAME_SERVICE_TAG ../game-service
+docker build -t temporal-rift/timeline-service:$TIMELINE_SERVICE_TAG ../timeline-service
+docker build -t temporal-rift/read-service:$READ_SERVICE_TAG ../read-service
+docker build -t temporal-rift/web-client:$WEB_CLIENT_TAG ../game-client
+
+docker compose -f docker-compose.e2e.yml up -d --build
+docker compose -f docker-compose.e2e.yml run --rm e2e-tests
+docker compose -f docker-compose.e2e.yml down -v
 ```
 
-  This installs Playwright's Chromium browser, builds the sibling `game-client` bundle, brings up the isolated
-deployment under Compose project `temporal-rift-browser-e2e` (distinct from `temporal-rift-e2e` and
-`temporal-rift-playtest`, so none of the three can disturb another or a developer's own dev stack), runs the
-suite, and tears down only its own project. `.github/workflows/browser-e2e.yml` runs the same command in CI,
-checking out `game-client` alongside the three services the way `system-e2e.yml` already does for those three, and
-uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace) on
-  failure only — bearer tokens and JWTs are redacted from logs and trace archives, then the bundle is checked for
-  remaining credentials before it is written.
-  Unlike `system-e2e.yml`/`security-e2e.yml`, this workflow does not run on every pull request — a full Chromium
-  install plus a complete multi-round game lifecycle makes it too slow for that. It runs only on a pull request
-  carrying the `run-browser-e2e` label, via manual `workflow_dispatch`, or via another workflow's `workflow_call`.
-  The test harness creates a short-lived HTTPS certificate for the interactive issuer and a matching Java truststore
-  for the three services. Chromium accepts the certificate inside its isolated test contexts.
+`up -d --build` only builds the `e2e-tests` test-runner image and the local `cert-init`/`config-server` images —
+the four application images above are consumed via the pinned tags, not compiled by Compose. `.github/workflows/
+browser-e2e.yml` runs the identical sequence in CI (building the four images from its own sibling checkouts first),
+and uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace,
+via `scripts/capture-browser-e2e-diagnostics.sh`) on failure only — bearer tokens and JWTs are redacted from logs
+and trace archives, then the bundle is checked for remaining credentials before it is written.
+
+Unlike `system-e2e.yml`/`security-e2e.yml`, this workflow does not run on every pull request — building five
+container images and a complete multi-round game lifecycle makes it too slow for that. It runs only on a pull
+request carrying the `run-browser-e2e` label, via manual `workflow_dispatch`, or via another workflow's
+`workflow_call`.
+
+`cert-init` generates a self-signed HTTPS certificate for the gateway (`app.e2e.test`) and the identity provider
+(`auth.e2e.test`), plus a Java truststore the three backend services trust it through — see
+`docker-compose.e2e.yml`'s comments for the full init-service layout (`cert-init`, `kafka-topics`,
+`identity-provider-ready`, `playtest-manifest-init`) and why each is kept single-purpose rather than combined.

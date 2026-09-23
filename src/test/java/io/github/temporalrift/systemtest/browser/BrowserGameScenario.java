@@ -25,9 +25,11 @@ import tools.jackson.databind.ObjectMapper;
 final class BrowserGameScenario implements AutoCloseable {
 
     // Overridable so a developer can point this suite at an already-running stack without editing
-    // source, matching the override conventions the playtest scripts already use.
-    private static final String CLIENT_ORIGIN =
-            System.getProperty("browserE2e.clientOrigin", "https://localhost:20443");
+    // source, matching the override conventions the playtest scripts already use. The default is
+    // the gateway's Compose network alias (docker-compose.e2e.yml) -- this JVM runs inside the
+    // e2e-tests container on that same network, so "localhost" would resolve to the container
+    // itself, not the gateway.
+    private static final String CLIENT_ORIGIN = System.getProperty("browserE2e.clientOrigin", "https://app.e2e.test");
     private static final Path MANIFEST_PATH =
             Path.of(System.getProperty("browserE2e.manifestPath", "playtest/manifest.json"));
     private static final Duration TRANSITION_TIMEOUT = Duration.ofSeconds(90);
