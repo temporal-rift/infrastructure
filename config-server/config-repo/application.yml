@@ -1,9 +1,10 @@
 # Shared cross-service configuration served to every Config Client application/profile that has no more
-# specific override. game-service and timeline-service both bind this same game.rules.probability namespace
-# directly — each service's own @ConfigurationProperties class only declares the fields it needs, so there is
-# exactly one copy of these values, not one per consuming service.
+# specific override. game-service and read-service share max-eras; game-service and timeline-service share
+# the game.rules.probability namespace. Each service binds only the values it needs, so there is one served
+# copy of each rule rather than one per consuming service.
 game:
   rules:
+    max-eras: 5
     probability:
       push-shift:
         I: 10
