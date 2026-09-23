@@ -25,8 +25,15 @@ external_origin="https://localhost:20443"
 # execution never runs. Without this trap a failed startup would leave the hosts alias and a
 # partially created Compose project behind. Cleared once the issuer reachability check passes.
 startup_complete=""
+compose_started=""
 fail_cleanup() {
   if [ -z "$startup_complete" ]; then
+    if [ -n "$compose_started" ]; then
+      # Pre-integration-test failures never reach the profile's diagnostics capture, so leave
+      # the recent service logs in the job output before the scoped teardown removes the stack.
+      echo "Startup failed after the Compose project was started -- dumping recent service logs..."
+      docker compose -p temporal-rift-browser-e2e "${compose_files[@]}" logs --no-color --timestamps --tail=200 || true
+    fi
     bash "$script_dir/stop-browser-e2e-stack.sh" || true
   fi
 }
@@ -98,6 +105,7 @@ echo "Resetting any stale browser-e2e project..."
 docker compose -p temporal-rift-browser-e2e "${compose_files[@]}" down -v --remove-orphans
 
 echo "Starting the browser-e2e deployment..."
+compose_started=1
 docker compose -p temporal-rift-browser-e2e "${compose_files[@]}" up --build --wait --wait-timeout 420
 
 echo "Confirming the interactive issuer is reachable from the host at ${issuer_url}..."
