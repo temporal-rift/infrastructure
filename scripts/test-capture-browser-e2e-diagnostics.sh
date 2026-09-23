@@ -112,6 +112,20 @@ if ! grep -qF '[REDACTED CREDENTIAL]' "$raw_jwt_root/out/playwright-traces/leak.
   failures=$((failures + 1))
 fi
 
+# --- A dotted Java stack-trace package path (three segments, each >= 10 chars) must survive
+# intact -- it is not a JWT, and the old unanchored pattern matched it. ---
+stacktrace_root="$fixtures_dir/stacktrace"
+mkdir -p "$stacktrace_root/traces"
+echo '{"ok":true}' > "$stacktrace_root/manifest.json"
+echo "at org.springframework.transaction.interceptor.TransactionInterceptor.invoke" \
+  > "$stacktrace_root/traces/stacktrace.txt"
+expect_pass "a stack trace bundle is published" run_capture "$stacktrace_root"
+if ! grep -qF 'springframework.transaction.interceptor' "$stacktrace_root/out/playwright-traces/stacktrace.txt" ||
+  grep -qF 'REDACTED' "$stacktrace_root/out/playwright-traces/stacktrace.txt"; then
+  echo "FAIL: an ordinary stack trace package path was redacted as if it were a credential"
+  failures=$((failures + 1))
+fi
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures fixture check(s) failed."
   exit 1

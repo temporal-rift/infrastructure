@@ -12,12 +12,17 @@ RUN apt-get update -qq \
     && echo "deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(awk -F= '/^VERSION_CODENAME/{print $2}' /etc/os-release) main" > /etc/apt/sources.list.d/adoptium.list \
     && apt-get update -qq \
     && apt-get install -y -qq --no-install-recommends temurin-26-jdk \
+    && ln -s "$(dirname "$(dirname "$(readlink -f "$(command -v javac)")")")" /usr/lib/jvm/temurin-26 \
     && rm -rf /var/lib/apt/lists/*
-ENV JAVA_HOME=/usr/lib/jvm/temurin-26-jdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/temurin-26
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
+# dlcdn.apache.org only serves the current release of each line -- the pinned version 404s once
+# the next 3.9.x ships. Maven Central keeps every version and publishes a checksum to verify.
 ARG MAVEN_VERSION=3.9.13
-RUN wget -q "https://dlcdn.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -O /tmp/maven.tar.gz \
+RUN maven_base="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
+    && wget -q "$maven_base" -O /tmp/maven.tar.gz \
+    && echo "$(wget -qO- "${maven_base}.sha512" | cut -d' ' -f1)  /tmp/maven.tar.gz" | sha512sum -c - \
     && tar -xzf /tmp/maven.tar.gz -C /opt \
     && rm /tmp/maven.tar.gz
 ENV PATH="/opt/apache-maven-${MAVEN_VERSION}/bin:${PATH}"
