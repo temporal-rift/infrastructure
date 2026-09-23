@@ -9,6 +9,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.AfterEach;
@@ -108,6 +112,87 @@ class BrowserGameplayIT {
         BrowserGameScenario.waitUntil(
                 () -> host.screen().hasSubmittedAction() && !host.screen().hasOpenActionRound(),
                 "host's reloaded browser shows the same accepted decision, not a fresh open round");
+
+        // The second player submits normally; the third deliberately never submits this round, so
+        // the round must close on its own accelerated (test-override) timeout, not deadlock.
+        players.get(1).screen().submitFirstAvailableAction(false);
+        BrowserGameScenario.waitUntil(
+                players.get(1).screen()::hasSubmittedAction, "second player's action is accepted");
+
+        var round1Label = slowPlayer.screen().currentRoundLabel();
+        BrowserGameScenario.waitUntil(
+                () -> !slowPlayer.screen().currentRoundLabel().equals(round1Label)
+                        || slowPlayer.screen().hasCompleteResults(),
+                "the round closes on timeout for the player who never submitted, and the game progresses");
+
+        // Finish the game normally so the harness leaves a clean, complete game behind.
+        driveGameToResults(players, false);
+        for (var player : players) {
+            assertThat(player.screen().finalScoreCount()).isEqualTo(players.size());
+        }
+    }
+
+    @Test
+    void lostActionResponseStillRecoversWithoutDuplicateSpendOrDeadlock() throws Exception {
+        scenario = new BrowserGameScenario();
+        var players = signInAndStartLobby("Host", "Second", "Third");
+        var host = players.get(0);
+        var slowPlayer = players.get(2);
+
+        BrowserGameScenario.waitUntil(
+                () -> players.stream()
+                        .allMatch(p ->
+                                p.screen().isHandKeepOffered() || p.screen().hasOpenActionRound()),
+                "round 1 is reachable for every player");
+        keepHandIfOffered(players);
+        BrowserGameScenario.waitUntil(
+                () -> players.stream().allMatch(p -> p.screen().hasOpenActionRound()),
+                "round 1's action step is open for every player");
+
+        // Drop the acknowledgement after the service has accepted it: fetch forwards the real
+        // request (so the service records the action), then abort hides the response from the
+        // browser. Only the first matching POST is dropped; later rounds resume normally.
+        var dropArmed = new AtomicBoolean(true);
+        var serviceAccepted = new AtomicBoolean(false);
+        var serviceStatus = new AtomicInteger(-1);
+        var accepted = new CountDownLatch(1);
+        host.page().route("**/eras/*/rounds/*/actions", route -> {
+            if (!"POST".equalsIgnoreCase(route.request().method()) || !dropArmed.getAndSet(false)) {
+                route.resume();
+                return;
+            }
+            try {
+                var response = route.fetch();
+                serviceStatus.set(response.status());
+                if (response.status() >= 200 && response.status() < 300) {
+                    serviceAccepted.set(true);
+                }
+            } catch (RuntimeException _) {
+                // The fetch itself failed, so nothing was accepted; the abort below still
+                // surfaces a network failure to the browser instead of hanging the submit.
+            } finally {
+                accepted.countDown();
+            }
+            route.abort();
+        });
+
+        host.screen().submitFirstAvailableAction(false);
+        assertThat(accepted.await(90, TimeUnit.SECONDS))
+                .as("the service receives the action before reload")
+                .isTrue();
+        assertThat(serviceAccepted)
+                .as("the dropped acknowledgement belongs to a service-accepted action (status %s)", serviceStatus.get())
+                .isTrue();
+        // Intentionally no wait for hasSubmittedAction: the acknowledgement was withheld, so the
+        // browser must recover the accepted decision from authoritative state after reload.
+        host.page().unroute("**/eras/*/rounds/*/actions");
+        host.reload();
+        BrowserGameScenario.waitUntil(
+                () -> host.screen().hasSubmittedAction() && !host.screen().hasOpenActionRound(),
+                "host's reloaded browser reconciles the same accepted decision, not a fresh open round");
+        assertThat(host.screen().submitFirstAvailableAction(false))
+                .as("the accepted action cannot be submitted or spent a second time")
+                .isEqualTo(GameScreen.ActionSubmission.NONE);
 
         // The second player submits normally; the third deliberately never submits this round, so
         // the round must close on its own accelerated (test-override) timeout, not deadlock.
