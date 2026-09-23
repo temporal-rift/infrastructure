@@ -90,6 +90,16 @@ rm -rf "$zip_workdir"
 expect_fail "a bundle whose trace archive contains a bearer token is refused" run_capture "$zip_root"
 [ ! -e "$zip_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
 
+# --- A raw JWT (mock issuer token responses carry bare access_token/id_token values with no
+# `Bearer` prefix) must also fail the capture step. ---
+raw_jwt_root="$fixtures_dir/raw-jwt"
+mkdir -p "$raw_jwt_root/traces"
+echo '{"ok":true}' > "$raw_jwt_root/manifest.json"
+echo "eyJhbGciOiJSUzI1NiJ9.abcdefghijklmnopqrstuvwxyz.signature0" \
+  > "$raw_jwt_root/traces/leak.txt"
+expect_fail "a bundle containing a raw JWT is refused" run_capture "$raw_jwt_root"
+[ ! -e "$raw_jwt_root/out" ] || { echo "FAIL: a refused bundle must not populate the published diagnostics directory"; failures=$((failures + 1)); }
+
 if [ "$failures" -gt 0 ]; then
   echo "$failures fixture check(s) failed."
   exit 1
