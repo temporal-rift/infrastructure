@@ -57,12 +57,14 @@ if [ -f "$manifest_file" ]; then
   cp "$manifest_file" "$staging_dir/manifest.json" 2>/dev/null || true
 fi
 
-# A bearer token, the mock issuer's signed JWTs, or a private key ever showing up in a bundled
-# diagnostics file is a defect in this script, not an acceptable diagnostic detail -- fail the step
-# instead of silently uploading it. Plain grep skips binary files by default, which would leave the
-# bundled Playwright trace .zip archives entirely unchecked even though they are part of the
-# artifact -- so their contents are extracted and scanned too, not just their file names.
-credential_pattern='(Bearer [A-Za-z0-9._-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
+# A bearer token, a raw JWT (the mock issuer's token endpoint returns signed JWTs as bare
+# `access_token`/`id_token` values with no `Bearer` prefix), or a private key ever showing up
+# in a bundled diagnostics file is a defect in this script, not an acceptable diagnostic
+# detail -- fail the step instead of silently uploading it. Plain grep skips binary files by
+# default, which would leave the bundled Playwright trace .zip archives entirely unchecked even
+# though they are part of the artifact -- so their contents are extracted and scanned too, not
+# just their file names.
+credential_pattern='(Bearer [A-Za-z0-9._-]{20,}|([A-Za-z0-9_-]{10,}\.){2}[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
 grep -rIlE "$credential_pattern" "$staging_dir" >"$flagged_files" 2>/dev/null || true
 
 find "$staging_dir" -iname '*.zip' >"$zip_list" 2>/dev/null || true
