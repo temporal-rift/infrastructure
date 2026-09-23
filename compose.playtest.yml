@@ -73,7 +73,10 @@ services:
       read-service:
         condition: service_started
     healthcheck:
-      test: ["CMD-SHELL", "wget --quiet --spider http://127.0.0.1/healthz || exit 1"]
+      # /healthz lives on the HTTPS server only: plain HTTP unconditionally 301-redirects to
+      # HTTPS, whose locally generated self-signed certificate wget would otherwise reject, so
+      # the probe must target HTTPS directly and skip certificate verification.
+      test: ["CMD-SHELL", "wget --no-check-certificate --quiet --spider https://127.0.0.1/healthz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
