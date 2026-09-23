@@ -26,7 +26,7 @@ manifest_file="${BROWSER_E2E_MANIFEST:-playtest/manifest.json}"
 staging_dir="$(mktemp -d)"
 flagged_files="$(mktemp)"
 zip_list="$(mktemp)"
-cleanup() { rm -rf "$staging_dir"; rm -f "$flagged_files" "$zip_list"; }
+cleanup() { rm -rf "$staging_dir"; rm -f "$flagged_files" "$zip_list"; return 0; }
 trap cleanup EXIT
 
 if [ "${BROWSER_E2E_SKIP_DOCKER:-}" != "1" ]; then
