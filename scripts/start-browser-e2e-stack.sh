@@ -80,12 +80,22 @@ echo "Building the game-client static bundle against this deployment..."
   VITE_API_BASE_URL="$external_origin" \
     VITE_OIDC_ISSUER_URL="$issuer_url" \
     VITE_OIDC_CLIENT_ID="browser-e2e" \
+    VITE_OIDC_AUDIENCE="$external_origin/api" \
     npm ci
   VITE_API_BASE_URL="$external_origin" \
     VITE_OIDC_ISSUER_URL="$issuer_url" \
     VITE_OIDC_CLIENT_ID="browser-e2e" \
+    VITE_OIDC_AUDIENCE="$external_origin/api" \
     npm run build
 )
+
+client_assets="$client_dir/dist/assets"
+for required_value in "$issuer_url" "$external_origin/api"; do
+  if ! grep -rFq -- "$required_value" "$client_assets"; then
+    echo "Built client is missing a required OIDC setting: $required_value" >&2
+    exit 1
+  fi
+done
 
 export JWT_ISSUER_URI="$issuer_url"
 export PLAYTEST_EXTERNAL_ORIGIN="$external_origin"
@@ -110,6 +120,9 @@ docker compose -p temporal-rift-browser-e2e "${compose_files[@]}" up --build --w
 
 echo "Confirming the interactive issuer is reachable from the host at ${issuer_url}..."
 curl --fail --silent --show-error --max-time 10 "${issuer_url}/.well-known/openid-configuration" >/dev/null
+
+echo "Confirming the player entry point can reach the gameplay backend..."
+curl --fail --silent --show-error --insecure --max-time 10 "${external_origin}/actuator/health" >/dev/null
 
 startup_complete=1
 trap - EXIT

@@ -1,5 +1,7 @@
 package io.github.temporalrift.systemtest.browser;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.regex.Pattern;
 
@@ -36,7 +38,7 @@ final class BrowserPlayer implements AutoCloseable {
 
     static BrowserPlayer signIn(Browser browser, String name, String subject, String clientOrigin) {
         // ignoreHTTPSErrors: the playtest edge terminates TLS with a locally generated,
-        // self-signed certificate for this suite (see design.md) — never a real deployment's cert.
+        // self-signed certificate for this suite — never a real deployment's cert.
         var context = browser.newContext(new Browser.NewContextOptions().setIgnoreHTTPSErrors(true));
         context.tracing()
                 .start(new Tracing.StartOptions()
@@ -45,13 +47,29 @@ final class BrowserPlayer implements AutoCloseable {
                         .setSources(false)
                         .setName(name));
         var page = context.newPage();
-        page.navigate(clientOrigin);
-        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Sign in"))
-                .click();
-        performMockIssuerLogin(page, subject);
-        page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Sign out"))
-                .waitFor();
-        return new BrowserPlayer(name, subject, context, page);
+        try {
+            page.navigate(clientOrigin);
+            page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Sign in"))
+                    .click();
+            performMockIssuerLogin(page, subject);
+            page.getByRole(AriaRole.BUTTON, new Page.GetByRoleOptions().setName("Sign out"))
+                    .waitFor();
+            return new BrowserPlayer(name, subject, context, page);
+        } catch (RuntimeException exception) {
+            // A failed login has no BrowserPlayer for scenario teardown to close. Capture
+            // its rendered error before closing the context so this failure is diagnosable.
+            try {
+                var screenshotsDir = Path.of(System.getProperty("browserE2e.tracesDir", "target/browser-e2e-traces"));
+                Files.createDirectories(screenshotsDir);
+                page.screenshot(
+                        new Page.ScreenshotOptions().setPath(screenshotsDir.resolve(name + "-sign-in-failure.png")));
+            } catch (IOException | RuntimeException captureFailure) {
+                exception.addSuppressed(captureFailure);
+            } finally {
+                context.close();
+            }
+            throw exception;
+        }
     }
 
     // mock-oauth2-server's own interactive debug login page (not this codebase's markup): a plain

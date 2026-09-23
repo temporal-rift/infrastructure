@@ -141,9 +141,27 @@ proxy_targets="$(grep "proxy_pass" "$nginx_conf" || true)"
 if echo "$proxy_targets" | grep -q -E "kafka-ui|grafana|zipkin|config-server|victoriametrics|victorialogs|alertmanager|vmalert|kafka-exporter"; then
   fail "$nginx_conf must not proxy diagnostic or privileged interfaces through the player entry point."
 fi
-if grep -n "actuator" "$nginx_conf" | grep -q "proxy_pass"; then
-  fail "$nginx_conf must not proxy upstream actuator endpoints through the player entry point."
+
+# The client probes this one path before rendering sign-in. It must check the
+# gameplay backend, but serve only the fixed local response, never the upstream
+# actuator payload. The internal subrequest is unreachable from a browser.
+readiness_block="$(sed -n '\#location = /actuator/health {#,/^[[:space:]]*}/p' "$nginx_conf")"
+internal_health_block="$(sed -n '\#location = /_gameplay_health {#,/^[[:space:]]*}/p' "$nginx_conf")"
+echo "$readiness_block" | grep -q 'auth_request /_gameplay_health;' \
+  || fail "$nginx_conf must gate the exact client readiness path on backend health."
+echo "$readiness_block" | grep -q 'try_files /readiness.json =503;' \
+  || fail "$nginx_conf must serve only the fixed client readiness response."
+if echo "$readiness_block" | grep -q 'proxy_pass'; then
+  fail "$nginx_conf must not return the upstream actuator payload to players."
 fi
+echo "$internal_health_block" | grep -q 'internal;' \
+  || fail "$nginx_conf must keep the backend health subrequest internal."
+echo "$internal_health_block" | grep -q 'proxy_pass http://playtest-game/actuator/health;' \
+  || fail "$nginx_conf must check game-service health before reporting readiness."
+[[ -f "$repo_root/playtest/readiness.json" ]] \
+  || fail "fixed client readiness response is missing."
+grep -q './playtest/readiness.json:/etc/nginx/readiness.json:ro' "$compose_file" \
+  || fail "$compose_file must mount the fixed client readiness response."
 
 # --- Static client ---
 

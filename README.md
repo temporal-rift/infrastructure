@@ -360,8 +360,9 @@ new deployable domain service in this topology.
 | All other `/api/` gameplay routes (lobbies, hand selection, actions, paradox resolution, scores) | game-service |
 | `/ws/` live notifications | read-service (single instance; best-effort — authenticated polling is the authoritative recovery path) |
 
-Upstream `/actuator/*`, observability UIs, Kafka UI, and the Config Server are never proxied: they return 404
-through the player origin by construction.
+The client readiness request at `/actuator/health` receives a fixed status response only after an internal
+game-service health check succeeds. Upstream health details are never returned. Other `/actuator/*` paths,
+observability UIs, Kafka UI, and the Config Server return 404 through the player origin.
 
 ### Prerequisites
 
@@ -370,7 +371,8 @@ through the player origin by construction.
   need their `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI` wired per service).
 - A TLS certificate and key for the playtest host.
 - The built static client: from the sibling browser-client checkout, configure `VITE_API_BASE_URL` to the
-  playtest origin itself (same-origin routing), plus `VITE_OIDC_ISSUER_URL`/`VITE_OIDC_CLIENT_ID`, then run its
+  playtest origin itself (same-origin routing), plus `VITE_OIDC_ISSUER_URL`/`VITE_OIDC_CLIENT_ID`/
+  `VITE_OIDC_AUDIENCE`, then run its
   build so `../game-client/dist/` is fresh. The manifest records the client build digest alongside the backend
   pins — rebuild the client for every deployment.
 
