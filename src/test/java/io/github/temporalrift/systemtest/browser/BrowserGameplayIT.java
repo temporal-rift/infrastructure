@@ -3,11 +3,12 @@ package io.github.temporalrift.systemtest.browser;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -54,23 +55,29 @@ class BrowserGameplayIT {
         var players = signInAndStartLobby(
                 "Erasers seat", "Prophets seat", "Revisionists seat", "Weavers seat", "Activists seat");
 
-        // The live client has no real faction display to read (only game-client's always-rendered
-        // sample fixture shows a faction, which is not this game's actual state — see
-        // AppShell/sampleFixturePlayerView), so this cannot assert five distinct factions or map a
-        // used special back to its owning faction. What is verifiable end to end: every seat reaches
-        // authoritative results, and at least one faction special is exercised through the browser
-        // somewhere in the game — weaker than "every faction's special", but concrete evidence
-        // rather than a vacuously passing loop.
-        var usedAnySpecial = driveGameToResults(players, true);
+        BrowserGameScenario.waitUntil(
+                () -> players.stream()
+                        .allMatch(player -> !player.screen().currentFaction().isBlank()),
+                "every player sees their own faction");
+        assertThat(players.stream()
+                        .map(player -> player.screen().currentFaction())
+                        .collect(Collectors.toSet()))
+                .containsExactlyInAnyOrder("ERASERS", "PROPHETS", "REVISIONISTS", "WEAVERS", "ACTIVISTS");
+
+        var coverage = driveGameToResults(players, true);
 
         for (var player : players) {
             assertThat(player.screen().winnerNames())
                     .as("%s's browser shows authoritative winners", player.name())
                     .isNotEmpty();
         }
-        assertThat(usedAnySpecial)
-                .as("at least one faction special is submitted through the browser during the game")
-                .isTrue();
+        assertThat(coverage.cardActors())
+                .as("every faction owner submits an ordinary card action")
+                .containsAll(players.stream().map(BrowserPlayer::name).toList());
+        assertThat(coverage.specialActors())
+                .as("every faction owner with an available special submits it")
+                .containsAll(coverage.specialAvailableActors())
+                .isNotEmpty();
         IsolationCheck.assertHandsStayPrivate(players);
         IsolationCheck.assertEarnedKnowledgeStaysPrivate(players);
     }
@@ -163,10 +170,12 @@ class BrowserGameplayIT {
      * submit a second action for that round, hiding exactly the duplicate-spend defect
      * {@link #reloadAndRoundTimeoutRecoverWithoutDuplicateSpendOrDeadlock} exists to catch.
      *
-     * @return true if any player's action round used a faction special at least once during the game
+     * @return the players who submitted cards or specials and whose special became available
      */
-    private boolean driveGameToResults(List<BrowserPlayer> players, boolean preferSpecial) {
-        Map<String, Boolean> usedSpecial = new HashMap<>();
+    private ActionCoverage driveGameToResults(List<BrowserPlayer> players, boolean preferSpecial) {
+        Set<String> cardActors = new HashSet<>();
+        Set<String> specialActors = new HashSet<>();
+        Set<String> specialAvailableActors = new HashSet<>();
         BrowserGameScenario.waitUntil(
                 () -> {
                     boolean allDone = true;
@@ -179,8 +188,15 @@ class BrowserGameplayIT {
                         if (screen.isHandKeepOffered()) {
                             screen.keepFirstFiveOfferedCards();
                         } else if (screen.hasOpenActionRound() && !screen.hasSubmittedAction()) {
-                            if (screen.submitFirstAvailableAction(preferSpecial)) {
-                                usedSpecial.put(player.name(), true);
+                            if (screen.hasAvailableSpecial()) {
+                                specialAvailableActors.add(player.name());
+                            }
+                            var submitted = screen.submitFirstAvailableAction(
+                                    preferSpecial && !specialActors.contains(player.name()));
+                            if (submitted == GameScreen.ActionSubmission.CARD) {
+                                cardActors.add(player.name());
+                            } else if (submitted == GameScreen.ActionSubmission.SPECIAL) {
+                                specialActors.add(player.name());
                             }
                         } else if (screen.hasOpenParadoxChoice()) {
                             screen.submitFirstEligibleParadoxChoice();
@@ -191,8 +207,11 @@ class BrowserGameplayIT {
                     return allDone;
                 },
                 "every player reaches authoritative terminal results");
-        return usedSpecial.containsValue(true);
+        return new ActionCoverage(cardActors, specialActors, specialAvailableActors);
     }
+
+    private record ActionCoverage(
+            Set<String> cardActors, Set<String> specialActors, Set<String> specialAvailableActors) {}
 
     private void assertTimingIsRecordedAsATestOverride() {
         var manifest = scenario.effectiveManifest();
