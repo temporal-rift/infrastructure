@@ -9,8 +9,12 @@ import zipfile
 from pathlib import Path
 
 
+# The JWT alternative is anchored on the header segment's fixed "eyJ" prefix (base64url of a
+# JSON object's leading `{"`) -- an unanchored three-dot-segment pattern also matches ordinary
+# dotted package paths in stack traces (e.g. "springframework.transaction.interceptor"),
+# redacting diagnostics that were never credentials.
 TOKEN = re.compile(
-    rb"Bearer [A-Za-z0-9._-]{20,}|(?:[A-Za-z0-9_-]{10,}\.){2}[A-Za-z0-9_-]{10,}"
+    rb"Bearer [A-Za-z0-9._-]{20,}|eyJ[A-Za-z0-9_-]{7,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
 )
 PRIVATE_KEY = re.compile(rb"-----BEGIN [A-Z ]*PRIVATE KEY-----")
 REDACTED = b"[REDACTED CREDENTIAL]"

@@ -60,10 +60,15 @@ services:
       - /bin/sh
       - -c
       - |
-        until curl --fail --silent --show-error --cacert /certs/issuer-cert.pem \
-            https://identity-provider:8080/default/.well-known/openid-configuration >/dev/null; do
+        # Must dial the cert's own SAN (auth.e2e.test), not the service name identity-provider --
+        # curl validates the TLS hostname against whatever host is in the URL.
+        for i in $$(seq 1 120); do
+          curl --fail --silent --show-error --cacert /certs/issuer-cert.pem \
+            https://auth.e2e.test:8080/default/.well-known/openid-configuration >/dev/null && exit 0
           sleep 1
         done
+        echo "identity provider not ready after 120s" >&2
+        exit 1
     depends_on:
       identity-provider:
         condition: service_started
@@ -80,18 +85,24 @@ services:
       - ..:/workspace:ro
       - ./config-server/config-repo:/workspace-config-repo:ro
       - ./target/browser-e2e-manifest:/manifest
+      # The built client lives in the web-client volume now, not a host-built game-client/dist --
+      # nothing populates that path in this Compose flow.
+      - e2e-web-client-dist:/client-dist:ro
     working_dir: /workspace/infrastructure
     environment:
       PLAYTEST_TIMING_PRESET: test-override
-      JWT_ISSUER_URI: https://auth.e2e.test
+      JWT_ISSUER_URI: https://auth.e2e.test:8080/default
       PLAYTEST_SERVICES_DIR: /workspace
       PLAYTEST_CONFIG_REPO: /workspace-config-repo
       PLAYTEST_CATALOG: /workspace/game-service/src/main/resources/future-events.yml
-      PLAYTEST_CLIENT_DIST: /workspace/game-client/dist
+      PLAYTEST_CLIENT_DIST: /client-dist
     entrypoint:
       - bash
       - scripts/write-playtest-manifest.sh
       - /manifest/manifest.json
+    depends_on:
+      web-client:
+        condition: service_completed_successfully
 
   # --- System under test ---
 
@@ -154,11 +165,6 @@ services:
       timeout: 5s
       retries: 12
 
-  victorialogs:
-    image: victoriametrics/victoria-logs:v1.52.0
-    command:
-      - "-syslog.listenAddr.tcp=:514"
-
   # navikt/mock-oauth2-server: a genuinely interactive OIDC test issuer with a real login page,
   # required for the browser to complete an actual redirect login. Network alias is the literal
   # issuer value every side must agree on -- see README.md's OIDC section.
@@ -185,7 +191,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: temporal_rift
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
-      JWT_ISSUER_URI: https://auth.e2e.test
+      JWT_ISSUER_URI: https://auth.e2e.test:8080/default
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
@@ -199,12 +205,6 @@ services:
           "paradox-resolution-timer-seconds":15}}}
     volumes:
       - e2e-tls:/certs:ro
-    logging:
-      driver: syslog
-      options:
-        syslog-address: tcp://victorialogs:514
-        syslog-format: rfc5424
-        tag: game-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -212,8 +212,6 @@ services:
         condition: service_completed_successfully
       zipkin:
         condition: service_healthy
-      victorialogs:
-        condition: service_started
       config-server:
         condition: service_healthy
       identity-provider-ready:
@@ -229,7 +227,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: temporal_rift
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
-      JWT_ISSUER_URI: https://auth.e2e.test
+      JWT_ISSUER_URI: https://auth.e2e.test:8080/default
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
@@ -237,12 +235,6 @@ services:
       JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/certs/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
     volumes:
       - e2e-tls:/certs:ro
-    logging:
-      driver: syslog
-      options:
-        syslog-address: tcp://victorialogs:514
-        syslog-format: rfc5424
-        tag: timeline-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -250,8 +242,6 @@ services:
         condition: service_completed_successfully
       zipkin:
         condition: service_healthy
-      victorialogs:
-        condition: service_started
       config-server:
         condition: service_healthy
       identity-provider-ready:
@@ -269,7 +259,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: temporal_rift
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
-      JWT_ISSUER_URI: https://auth.e2e.test
+      JWT_ISSUER_URI: https://auth.e2e.test:8080/default
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
@@ -277,12 +267,6 @@ services:
       JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/certs/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
     volumes:
       - e2e-tls:/certs:ro
-    logging:
-      driver: syslog
-      options:
-        syslog-address: tcp://victorialogs:514
-        syslog-format: rfc5424
-        tag: read-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -290,8 +274,6 @@ services:
         condition: service_completed_successfully
       zipkin:
         condition: service_healthy
-      victorialogs:
-        condition: service_started
       config-server:
         condition: service_healthy
       identity-provider-ready:
@@ -308,7 +290,7 @@ services:
     image: temporal-rift/web-client:${WEB_CLIENT_TAG:?WEB_CLIENT_TAG must be set to a built image tag}
     environment:
       APP_API_BASE_URL: https://app.e2e.test
-      APP_OIDC_ISSUER_URL: https://auth.e2e.test
+      APP_OIDC_ISSUER_URL: https://auth.e2e.test:8080/default
       APP_OIDC_CLIENT_ID: browser-e2e
       APP_OIDC_AUDIENCE: https://app.e2e.test/api
     entrypoint:
