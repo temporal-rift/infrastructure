@@ -29,7 +29,7 @@ trap remove_hosts_alias EXIT
 # as its own process with none of start-browser-e2e-stack.sh's exports in scope -- a separate CI
 # workflow step gets a fresh shell, and even a same-profile Maven execution does not inherit a
 # sibling execution's environment -- so real values are never assumed to already be set.
-export JWT_ISSUER_URI="${JWT_ISSUER_URI:-http://browser-e2e-auth:8080/default}"
+export JWT_ISSUER_URI="${JWT_ISSUER_URI:-https://browser-e2e-auth:8080/default}"
 export PLAYTEST_EXTERNAL_ORIGIN="${PLAYTEST_EXTERNAL_ORIGIN:-https://localhost:20443}"
 export PLAYTEST_TLS_CERT="${PLAYTEST_TLS_CERT:-$repo_root/target/browser-e2e-tls/cert.pem}"
 export PLAYTEST_TLS_KEY="${PLAYTEST_TLS_KEY:-$repo_root/target/browser-e2e-tls/key.pem}"

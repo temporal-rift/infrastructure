@@ -19,8 +19,9 @@ name: temporal-rift-browser-e2e
 #   remapped host port, or the two sides would mint/validate against different issuer strings.
 #   scripts/start-browser-e2e-stack.sh maps the `browser-e2e-auth` hostname to 127.0.0.1 in the
 #   host's own hosts file and publishes this container's port unchanged (8080:8080) to make that
-#   possible. Only this dedicated suite's own host port 8080 is at stake; compose.yml's local dev
-#   game-service (also normally 8080) is unaffected unless both stacks run on the same host at once
+#   possible. The issuer serves HTTPS with a test certificate, so the HTTPS client can discover it
+#   without mixed-content blocking. Only this dedicated suite's host port 8080 is at stake;
+#   compose.yml's local dev game-service is unaffected unless both stacks run on the same host at once
 #   — documented in README.md as a known limitation of the underlying mock issuer, not of Compose.
 # - Accelerated, explicitly-labeled round/selection/paradox timers on game-service and
 #   timeline-service, scoped to this project only — never compose.playtest.yml's own defaults,
@@ -36,7 +37,9 @@ services:
       # Interactive logins map the submitted username to the token's `sub` via the mock issuer's
       # default login callback. No explicit tokenCallbacks: a subject-based request mapping would
       # need a `${subject}` template that Compose would interpolate as its own variable.
-      JSON_CONFIG: '{"interactiveLogin":true,"httpServer":"NettyWrapper"}'
+      JSON_CONFIG: '{"interactiveLogin":true,"httpServer":{"type":"NettyWrapper","ssl":{"keyPassword":"browser-e2e","keystoreFile":"/tls/issuer-keystore.p12","keystorePassword":"browser-e2e","keystoreType":"PKCS12"}}}'
+    volumes:
+      - ./target/browser-e2e-tls/issuer-keystore.p12:/tls/issuer-keystore.p12:ro
     ports:
       - "8080:8080"
     # No healthcheck: this image is a distroless Jib build with no shell, wget, or curl, so no
@@ -48,24 +51,34 @@ services:
       browser-e2e-auth:
         condition: service_started
     environment:
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/temporal-rift/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
       # Bounded, explicitly labeled acceleration for this suite only — real playtests never set
       # this. Matches src/test/resources/compose.e2e.yml's precedent for shortening the same timers.
       SPRING_APPLICATION_JSON: >-
         {"game":{"rules":{"action-round-timer-seconds":{"3":15,"4":15,"5":15},
           "hand-selection-timer-seconds":{"3":15,"4":15,"5":15}}}}
+    volumes:
+      - ./target/browser-e2e-tls/issuer-truststore.p12:/etc/temporal-rift/issuer-truststore.p12:ro
 
   timeline-service:
     depends_on:
       browser-e2e-auth:
         condition: service_started
     environment:
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/temporal-rift/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
       SPRING_APPLICATION_JSON: >-
         {"game":{"rules":{"paradox-resolution-timer-seconds":15}}}
+    volumes:
+      - ./target/browser-e2e-tls/issuer-truststore.p12:/etc/temporal-rift/issuer-truststore.p12:ro
 
   read-service:
     depends_on:
       browser-e2e-auth:
         condition: service_started
+    environment:
+      JAVA_TOOL_OPTIONS: "-Djavax.net.ssl.trustStore=/etc/temporal-rift/issuer-truststore.p12 -Djavax.net.ssl.trustStorePassword=changeit"
+    volumes:
+      - ./target/browser-e2e-tls/issuer-truststore.p12:/etc/temporal-rift/issuer-truststore.p12:ro
 
   playtest-edge:
     # Distinct from compose.playtest.yml's default 80/443 so this suite can run alongside a real
