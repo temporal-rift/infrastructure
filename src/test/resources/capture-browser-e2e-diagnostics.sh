@@ -22,6 +22,7 @@ set -u
 target_dir="${BROWSER_E2E_DIAGNOSTICS_DIR:-target/browser-e2e-diagnostics}"
 traces_dir="${BROWSER_E2E_TRACES_DIR:-target/browser-e2e-traces}"
 manifest_file="${BROWSER_E2E_MANIFEST:-playtest/manifest.json}"
+repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
 
 staging_dir="$(mktemp -d)"
 flagged_files="$(mktemp)"
@@ -36,10 +37,10 @@ if [ "${BROWSER_E2E_SKIP_DOCKER:-}" != "1" ]; then
   # Compose's required-variable interpolation doesn't abort the parse before it can find the
   # project's existing containers by label. This execution does not inherit
   # start-browser-e2e-stack.sh's exports (a separate Maven execution is a separate process).
-  JWT_ISSUER_URI="${JWT_ISSUER_URI:-http://browser-e2e-auth:8080/default}"
+  JWT_ISSUER_URI="${JWT_ISSUER_URI:-https://browser-e2e-auth:8080/default}"
   PLAYTEST_EXTERNAL_ORIGIN="${PLAYTEST_EXTERNAL_ORIGIN:-https://localhost:20443}"
-  PLAYTEST_TLS_CERT="${PLAYTEST_TLS_CERT:-target/browser-e2e-tls/cert.pem}"
-  PLAYTEST_TLS_KEY="${PLAYTEST_TLS_KEY:-target/browser-e2e-tls/key.pem}"
+  PLAYTEST_TLS_CERT="${PLAYTEST_TLS_CERT:-$repo_root/target/browser-e2e-tls/cert.pem}"
+  PLAYTEST_TLS_KEY="${PLAYTEST_TLS_KEY:-$repo_root/target/browser-e2e-tls/key.pem}"
   export JWT_ISSUER_URI PLAYTEST_EXTERNAL_ORIGIN PLAYTEST_TLS_CERT PLAYTEST_TLS_KEY
 
   docker compose -p temporal-rift-browser-e2e $compose_files logs --no-color --timestamps \

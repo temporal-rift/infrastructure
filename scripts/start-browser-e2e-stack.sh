@@ -7,7 +7,7 @@
 #
 # Usage: bash scripts/start-browser-e2e-stack.sh
 #
-# Requires: docker compose v2.24.4+, openssl, a sibling game-client checkout with Node available,
+# Requires: docker compose v2.24.4+, openssl, Java 26 keytool, a sibling game-client checkout with Node available,
 # and (on Linux) passwordless sudo to add the one-line hosts-file alias below.
 set -euo pipefail
 
@@ -18,7 +18,7 @@ client_dir="$workspace_root/game-client"
 tls_dir="$repo_root/target/browser-e2e-tls"
 
 issuer_host="browser-e2e-auth"
-issuer_url="http://${issuer_host}:8080/default"
+issuer_url="https://${issuer_host}:8080/default"
 external_origin="https://localhost:20443"
 
 # If any step below fails, Maven never reaches post-integration-test, so the profile's stop
@@ -69,10 +69,24 @@ fi
 echo "Generating local TLS material for the playtest edge..."
 mkdir -p "$tls_dir"
 if [[ ! -f "$tls_dir/cert.pem" || ! -f "$tls_dir/key.pem" ]]; then
-  openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+  MSYS2_ARG_CONV_EXCL=/CN= openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
     -keyout "$tls_dir/key.pem" -out "$tls_dir/cert.pem" \
     -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
 fi
+
+echo "Generating local TLS material for the interactive test issuer..."
+issuer_cert="$tls_dir/issuer-cert.pem"
+issuer_key="$tls_dir/issuer-key.pem"
+issuer_keystore="$tls_dir/issuer-keystore.p12"
+issuer_truststore="$tls_dir/issuer-truststore.p12"
+MSYS2_ARG_CONV_EXCL=/CN= openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+  -keyout "$issuer_key" -out "$issuer_cert" \
+  -subj "/CN=${issuer_host}" -addext "subjectAltName=DNS:${issuer_host}"
+openssl pkcs12 -export -inkey "$issuer_key" -in "$issuer_cert" \
+  -out "$issuer_keystore" -passout pass:browser-e2e
+rm -f "$issuer_truststore"
+keytool -importcert -noprompt -alias browser-e2e-auth -file "$issuer_cert" \
+  -keystore "$issuer_truststore" -storetype PKCS12 -storepass changeit
 
 echo "Building the game-client static bundle against this deployment..."
 (
@@ -119,7 +133,8 @@ compose_started=1
 docker compose -p temporal-rift-browser-e2e "${compose_files[@]}" up --build --wait --wait-timeout 420
 
 echo "Confirming the interactive issuer is reachable from the host at ${issuer_url}..."
-curl --fail --silent --show-error --max-time 10 "${issuer_url}/.well-known/openid-configuration" >/dev/null
+curl --fail --silent --show-error --cacert "$issuer_cert" --max-time 10 \
+  "${issuer_url}/.well-known/openid-configuration" >/dev/null
 
 echo "Confirming the player entry point can reach the gameplay backend..."
 curl --fail --silent --show-error --insecure --max-time 10 "${external_origin}/actuator/health" >/dev/null

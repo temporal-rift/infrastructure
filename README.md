@@ -438,7 +438,7 @@ system-e2e harness already documents as lacking a complete production path.
 - Everything `compose.playtest.yml` requires (see above), plus a sibling `game-client` checkout with Node
   available — this suite builds its static bundle itself against its own deployment, so no pre-built `dist/` is
   needed beforehand.
-- `docker`, `openssl`, and (on Linux) passwordless `sudo` to add a one-line hosts-file alias its interactive mock
+  - `docker`, `openssl`, Java 26 `keytool`, and (on Linux) passwordless `sudo` to add a one-line hosts-file alias its interactive mock
   OIDC issuer needs — see `compose.browser-e2e.yml` for why a genuinely interactive issuer, unlike the command-only
   harness's static `e2e-auth`, is required, and why the alias must resolve identically on the host and inside the
   Compose network.
@@ -449,10 +449,12 @@ system-e2e harness already documents as lacking a complete production path.
 mvn verify -Pbrowser-e2e
 ```
 
-This installs Playwright's Chromium browser, builds the sibling `game-client` bundle, brings up the isolated
+  This installs Playwright's Chromium browser, builds the sibling `game-client` bundle, brings up the isolated
 deployment under Compose project `temporal-rift-browser-e2e` (distinct from `temporal-rift-e2e` and
 `temporal-rift-playtest`, so none of the three can disturb another or a developer's own dev stack), runs the
 suite, and tears down only its own project. `.github/workflows/browser-e2e.yml` runs the same command in CI,
 checking out `game-client` alongside the three services the way `system-e2e.yml` already does for those three, and
 uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace) on
-failure only — mechanically checked to never contain a bearer token or signing key before it is written.
+  failure only — mechanically checked to never contain a bearer token or signing key before it is written.
+  The test harness creates a short-lived HTTPS certificate for the interactive issuer and a matching Java truststore
+  for the three services. Chromium accepts the certificate inside its isolated test contexts.
