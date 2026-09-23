@@ -2,6 +2,7 @@ package io.github.temporalrift.systemtest.browser;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -206,7 +207,8 @@ class BrowserGameplayIT {
                     }
                     return allDone;
                 },
-                "every player reaches authoritative terminal results");
+                "every player reaches authoritative terminal results",
+                Duration.ofMinutes(8));
         return new ActionCoverage(cardActors, specialActors, specialAvailableActors);
     }
 

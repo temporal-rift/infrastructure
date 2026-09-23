@@ -47,7 +47,11 @@ final class BrowserGameScenario implements AutoCloseable {
     }
 
     static void waitUntil(BooleanSupplier condition, String description) {
-        await().atMost(TRANSITION_TIMEOUT)
+        waitUntil(condition, description, TRANSITION_TIMEOUT);
+    }
+
+    static void waitUntil(BooleanSupplier condition, String description, Duration timeout) {
+        await().atMost(timeout)
                 .pollInterval(Duration.ofMillis(500))
                 .alias(description)
                 .until(condition::getAsBoolean);
