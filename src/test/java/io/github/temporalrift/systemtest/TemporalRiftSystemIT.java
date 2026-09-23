@@ -587,6 +587,12 @@ class TemporalRiftSystemIT {
         void gameEndingDirectlyFromEraTwoClearsActiveCurrentEraIntel() {
             var roundThreeStates = allPlayers.stream()
                     .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtEraRound(player, gameId, 2, 3)));
+            assertThat(roundThreeStates.get(mainScanner).hand())
+                    .filteredOn(card -> "STALL".equals(card.cardType()))
+                    .singleElement()
+                    .satisfies(card -> assertThat(card.isPlayableThisRound())
+                            .as("STALL is unavailable in the configured final era")
+                            .isFalse());
             for (var player : allPlayers) {
                 playAnyEligibleAction(player, allPlayers, gameId, 2, 3, roundThreeStates.get(player));
             }
@@ -767,7 +773,19 @@ class TemporalRiftSystemIT {
         var gameId = startGameWithThreePlayers(host, playerTwo, playerThree);
         dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseAlwaysPlayableHand);
 
-        var finalStates = playUntilGameEnded(gameId, players);
+        playUntilGameEnded(gameId, players);
+        var finalStates = players.stream()
+                .collect(Collectors.toMap(
+                        player -> player,
+                        player -> scenario.awaitPlayerState(
+                                player,
+                                gameId,
+                                candidate -> "GAME_ENDED".equals(candidate.phase())
+                                        && candidate.players().size() == players.size()
+                                        && candidate.players().stream()
+                                                .allMatch(view -> view.faction() != null
+                                                        && !view.faction().isBlank()),
+                                player.name() + " receives the final faction reveal")));
 
         for (var player : players) {
             assertThat(finalStates.get(player).players())

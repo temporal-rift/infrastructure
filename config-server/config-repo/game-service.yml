@@ -1,6 +1,5 @@
 # Served only to the Config Client whose spring.application.name is game-service, layered on top of
-# application.yml's shared game.rules.probability namespace. Values here mirror what game-service's own
-# application.yml currently hard-codes; game-service is not yet reading them from here.
+# application.yml's shared game rules.
 game:
   rate-limit:
     requests-per-minute: 120
@@ -18,7 +17,6 @@ game:
   rules:
     min-players: 3
     max-players: 5
-    max-eras: 5
     max-cascaded-paradoxes: 3
     events-per-era: 3
     cards-per-hand: 5

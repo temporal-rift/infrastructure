@@ -91,6 +91,7 @@ services:
     environment:
       JWT_ISSUER_URI: http://e2e-auth
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
+      SPRING_APPLICATION_JSON: '{"game":{"rules":{"max-eras":2}}}'
     depends_on:
       e2e-auth:
         condition: service_healthy
