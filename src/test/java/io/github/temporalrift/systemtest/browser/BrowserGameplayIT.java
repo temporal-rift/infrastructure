@@ -41,9 +41,9 @@ class BrowserGameplayIT {
         driveGameToResults(players, false);
 
         for (var player : players) {
-            assertThat(player.screen().winnerNames())
-                    .as("%s's browser shows authoritative winners", player.name())
-                    .isNotEmpty();
+            assertThat(player.screen().finalScoreCount())
+                    .as("%s's browser shows every player's authoritative final score", player.name())
+                    .isEqualTo(players.size());
         }
         IsolationCheck.assertHandsStayPrivate(players);
         IsolationCheck.assertEarnedKnowledgeStaysPrivate(players);
@@ -68,9 +68,9 @@ class BrowserGameplayIT {
         var coverage = driveGameToResults(players, true);
 
         for (var player : players) {
-            assertThat(player.screen().winnerNames())
-                    .as("%s's browser shows authoritative winners", player.name())
-                    .isNotEmpty();
+            assertThat(player.screen().finalScoreCount())
+                    .as("%s's browser shows every player's authoritative final score", player.name())
+                    .isEqualTo(players.size());
         }
         assertThat(coverage.cardActors())
                 .as("every faction owner submits an ordinary card action")
@@ -124,7 +124,7 @@ class BrowserGameplayIT {
         // Finish the game normally so the harness leaves a clean, complete game behind.
         driveGameToResults(players, false);
         for (var player : players) {
-            assertThat(player.screen().winnerNames()).isNotEmpty();
+            assertThat(player.screen().finalScoreCount()).isEqualTo(players.size());
         }
     }
 
