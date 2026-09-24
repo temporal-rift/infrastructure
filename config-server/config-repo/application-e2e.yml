@@ -1,0 +1,4 @@
+# Shared E2E game length for every Config Client that uses the e2e profile.
+game:
+  rules:
+    max-eras: 2
