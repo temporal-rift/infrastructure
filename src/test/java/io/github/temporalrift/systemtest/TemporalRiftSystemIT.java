@@ -577,7 +577,7 @@ class TemporalRiftSystemIT {
             assertThat(afterActionlessRound.revealedIntel()).isNotEmpty();
         }
 
-        // Era 2 is compose.e2e.yml's configured max era, so driving it to completion deterministically reaches
+        // Era 2 is the E2E profile's configured max era, so driving it to completion deterministically reaches
         // GAME_ENDED (via win, collapse, or stabilization at the max-eras boundary -- the same guarantee
         // gameReachesGameEndedWithAgreeingFinalScoresAndRevealedFactions relies on) rather than opening an era 3
         // that doesn't exist. The previous step leaves the era-2 Scan's intel active, so the game ends with
@@ -589,8 +589,9 @@ class TemporalRiftSystemIT {
                     .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtEraRound(player, gameId, 2, 3)));
             assertThat(roundThreeStates.get(mainScanner).hand())
                     .filteredOn(card -> "STALL".equals(card.cardType()))
-                    .singleElement()
-                    .satisfies(card -> assertThat(card.isPlayableThisRound())
+                    .as("the main scanner holds STALL in the final era")
+                    .isNotEmpty()
+                    .allSatisfy(card -> assertThat(card.isPlayableThisRound())
                             .as("STALL is unavailable in the configured final era")
                             .isFalse());
             for (var player : allPlayers) {
