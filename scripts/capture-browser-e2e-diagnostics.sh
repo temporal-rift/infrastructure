@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs on the host after `docker compose -f docker-compose.e2e.yml --profile test run --rm e2e-tests`,
-# before `down -v` -- unlike the old Maven-bound version, this is no longer a profile execution, since
+# Runs on the host after the e2e-tests run (see .github/workflows/browser-e2e.yml), before
+# `down -v` -- unlike the old Maven-bound version, this is no longer a profile execution, since
 # e2e-tests' traces/manifest are now bind-mounted to the host (docker-compose.e2e.yml) rather than
 # living only inside a container this script would need Docker exec access to.
 #

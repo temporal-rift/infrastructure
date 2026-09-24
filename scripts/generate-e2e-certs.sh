@@ -10,6 +10,13 @@ set -euo pipefail
 out_dir="${1:?output directory argument required}"
 mkdir -p "$out_dir"
 
+# Compose re-runs completed one-shots on a later `up`/`run`; regenerating would leave the already
+# running identity provider and gateway serving certs the new truststore no longer trusts.
+if [ -f "$out_dir/.complete" ]; then
+  echo "TLS material already present in $out_dir; keeping it."
+  exit 0
+fi
+
 gateway_host="app.e2e.test"
 issuer_host="auth.e2e.test"
 
@@ -30,4 +37,5 @@ rm -f "$out_dir/issuer-truststore.p12"
 keytool -importcert -noprompt -alias "$issuer_host" -file "$out_dir/issuer-cert.pem" \
   -keystore "$out_dir/issuer-truststore.p12" -storetype PKCS12 -storepass changeit
 
+touch "$out_dir/.complete"
 echo "TLS material written to $out_dir."

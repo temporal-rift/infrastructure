@@ -463,8 +463,9 @@ docker build -t temporal-rift/timeline-service:$TIMELINE_SERVICE_TAG ../timeline
 docker build -t temporal-rift/read-service:$READ_SERVICE_TAG ../read-service
 docker build -t temporal-rift/web-client:$WEB_CLIENT_TAG ../game-client
 
-docker compose -f docker-compose.e2e.yml up -d --build
-docker compose -f docker-compose.e2e.yml --profile test run --rm e2e-tests
+docker compose -f docker-compose.e2e.yml up -d --build --wait
+docker compose -f docker-compose.e2e.yml --profile test run --rm --no-deps playtest-manifest-init
+docker compose -f docker-compose.e2e.yml --profile test run --rm --no-deps e2e-tests
 docker compose -f docker-compose.e2e.yml down -v
 ```
 
