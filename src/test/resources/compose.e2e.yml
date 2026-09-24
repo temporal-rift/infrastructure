@@ -67,17 +67,15 @@ services:
     ports: !override
       - "18080:8080"
     environment:
+      SPRING_PROFILES_ACTIVE: docker,e2e
       JWT_ISSUER_URI: http://e2e-auth
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
       LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB: DEBUG
-      # max-eras: 2 keeps the game-ended lifecycle scenario within the e2e time budget -- it needs the
-      # game to reach a terminal state (win, collapse, or stabilization), not to actually play out all
-      # five production eras of real card combat.
       # card-grade-weights biases forced deals toward grade II/III (default is I:60,II:30,III:10) so the
       # scan-multi-target scenario's forced SCAN reliably resolves at a grade that can target more than one
       # event, without retrying across games/eras (single-grade cards are unaffected in kind).
       SPRING_APPLICATION_JSON: >-
-        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":60,"4":45,"5":30},"hand-deal-forced-types":["TRACE","NULLIFY","SCAN","STALL"],"card-grade-weights":{"I":10,"II":50,"III":40},"max-eras":2}}}
+        {"game":{"rate-limit":{"requests-per-minute":1000},"rules":{"action-round-timer-seconds":{"3":8,"4":8,"5":8},"hand-selection-timer-seconds":{"3":60,"4":45,"5":30},"hand-deal-forced-types":["TRACE","NULLIFY","SCAN","STALL"],"card-grade-weights":{"I":10,"II":50,"III":40}}}}
     depends_on:
       e2e-auth:
         condition: service_healthy
@@ -89,9 +87,9 @@ services:
     ports: !override
       - "18082:8080"
     environment:
+      SPRING_PROFILES_ACTIVE: e2e
       JWT_ISSUER_URI: http://e2e-auth
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://e2e-auth/jwks.json
-      SPRING_APPLICATION_JSON: '{"game":{"rules":{"max-eras":2}}}'
     depends_on:
       e2e-auth:
         condition: service_healthy
