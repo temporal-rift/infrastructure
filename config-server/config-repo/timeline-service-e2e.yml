@@ -1,0 +1,4 @@
+# Keep unresolved paradoxes within the E2E transition wait budget.
+game:
+  rules:
+    paradox-resolution-timer-seconds: 5

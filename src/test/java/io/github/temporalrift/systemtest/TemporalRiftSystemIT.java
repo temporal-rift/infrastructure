@@ -79,7 +79,7 @@ class TemporalRiftSystemIT {
     private static final Map<String, String> BUDGETED_SPECIAL_BY_FACTION =
             Map.of("ERASERS", "ANNIHILATE", "PROPHETS", "SEAL", "REVISIONISTS", "MIMIC");
 
-    // Matches compose.e2e.yml's game.rules.max-eras override: enough eras to reach a terminal state
+    // Matches the Config Server E2E profile's game.rules.max-eras: enough eras to reach a terminal state
     // (win, collapse, or stabilization) without playing out all five production eras of real combat.
     private static final int E2E_MAX_ERAS = 2;
 
@@ -201,8 +201,8 @@ class TemporalRiftSystemIT {
         var budgetedSpecial =
                 BUDGETED_SPECIAL_BY_FACTION.get(budgetedEntry.getValue().myFaction());
 
-        // Both probes now have guaranteed material every run: `hand-deal-forced-types` (e2e-only config,
-        // see compose.e2e.yml) forces TRACE (round-1-ineligible, not player-targeting) and NULLIFY
+        // Both probes now have guaranteed material every run: the E2E Config Server profile's
+        // `hand-deal-forced-types` forces TRACE (round-1-ineligible, not player-targeting) and NULLIFY
         // (player-targeting, not round-restricted) into every player's seven-card deal, and
         // `chooseEraOneHand` already keeps one of each when selecting the five-card hand. Neither probe can
         // be asserted on every single call, though — TRACE is only ineligible in round 1, and a probe
@@ -620,7 +620,7 @@ class TemporalRiftSystemIT {
 
     // Forcing the SCAN *type* into every deal doesn't force its *grade* (WeightedCardDealer still rolls a
     // weighted grade per forced card), so which of the three players -- if any -- gets grade II/III is a
-    // property of a given deal, not something assignable up front. compose.e2e.yml biases the roll toward
+    // property of a given deal, not something assignable up front. The E2E Config Server profile biases the roll toward
     // II/III (~99.9% at least one qualifies per deal), but a single "fail loudly if none do" attempt still
     // leaves a real, if small, chance of a random CI failure. Retrying with an entirely fresh game on the rare
     // all-grade-I deal brings the compound failure probability to roughly 1 in 10^15 -- not a real CI risk --
@@ -746,7 +746,8 @@ class TemporalRiftSystemIT {
     }
 
     // Keeps SCAN, STALL, and NULLIFY -- all four forced types except TRACE are relevant to this scenario, and
-    // every player's deal offers all four (hand-deal-forced-types in compose.e2e.yml) -- plus filler cards that
+    // every player's deal offers all four (hand-deal-forced-types in the E2E Config Server profile) -- plus filler
+    // cards that
     // this scenario never plays, to reach the required five-card selection.
     private static List<UUID> chooseScanScenarioHand(List<Card> offer) {
         var kept = new ArrayList<Card>();
@@ -812,8 +813,8 @@ class TemporalRiftSystemIT {
         }
     }
 
-    // Bounded by E2E_MAX_ERAS rather than looping forever: with game.rules.max-eras overridden to that
-    // value (compose.e2e.yml), the game is guaranteed to reach GAME_ENDED (via win, collapse, or
+    // Bounded by E2E_MAX_ERAS rather than looping forever: with game.rules.max-eras set to that
+    // value in the E2E Config Server profile, the game is guaranteed to reach GAME_ENDED (via win, collapse, or
     // stabilization) at or before that era's resolution, so exceeding it is a genuine defect worth failing
     // loudly on rather than silently retrying past this scenario's time budget.
     private Map<Actor, PlayerState> playUntilGameEnded(UUID gameId, List<Actor> players) {
@@ -1095,7 +1096,7 @@ class TemporalRiftSystemIT {
 
     /**
      * Fills a player's round action. Covers two rules with guaranteed material this scenario forces into
-     * every deal (see {@code hand-deal-forced-types} in compose.e2e.yml): a round-ineligible card, probed
+     * every deal (see {@code hand-deal-forced-types} in the E2E Config Server profile): a round-ineligible card, probed
      * and confirmed non-consuming before the real submission, and a player-targeting card, submitted against
      * a forged then a real opponent. Which specific call ends up exercising each one still depends on
      * per-round eligibility and turn order, so both are opportunistic per call — the caller tracks whether
