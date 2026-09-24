@@ -173,11 +173,20 @@ jobs:
         # completed for one-shots) and fails this step with a clear message naming which one
         # didn't -- without it, `up -d` returns as soon as containers merely start, and any real
         # problem only surfaces later, opaquely, inside `run --rm e2e-tests`.
-        run: docker compose -f docker-compose.e2e.yml up -d --build --wait --wait-timeout 300
+        # Bind-mount sources Docker has to create itself end up root-owned, which would block the
+        # diagnostics step from writing under target/.
+        run: |
+          mkdir -p target/browser-e2e-manifest target/browser-e2e-traces target/browser-e2e-diagnostics
+          docker compose -f docker-compose.e2e.yml up -d --build --wait --wait-timeout 300
 
       - name: Show container status
         if: failure() && steps.up.outcome == 'failure'
         working-directory: infrastructure
+        env:
+          GAME_SERVICE_TAG: ${{ steps.build.outputs.game_service_tag }}
+          TIMELINE_SERVICE_TAG: ${{ steps.build.outputs.timeline_service_tag }}
+          READ_SERVICE_TAG: ${{ steps.build.outputs.read_service_tag }}
+          WEB_CLIENT_TAG: ${{ steps.build.outputs.web_client_tag }}
         run: |
           docker compose -f docker-compose.e2e.yml ps --all
           docker compose -f docker-compose.e2e.yml logs --no-color --timestamps --tail=200
@@ -190,7 +199,7 @@ jobs:
           TIMELINE_SERVICE_TAG: ${{ steps.build.outputs.timeline_service_tag }}
           READ_SERVICE_TAG: ${{ steps.build.outputs.read_service_tag }}
           WEB_CLIENT_TAG: ${{ steps.build.outputs.web_client_tag }}
-        run: docker compose -f docker-compose.e2e.yml run --rm e2e-tests
+        run: docker compose -f docker-compose.e2e.yml --profile test run --rm e2e-tests
 
       - name: Capture diagnostics
         if: failure()

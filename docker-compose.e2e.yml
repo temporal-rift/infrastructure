@@ -81,6 +81,8 @@ services:
   # checkout layout.
   playtest-manifest-init:
     image: bash:5
+    # Only e2e-tests consumes this; outside its profile `up --wait` fails on the one-shot's exit.
+    profiles: [test]
     volumes:
       - ..:/workspace:ro
       - ./config-server/config-repo:/workspace-config-repo:ro
