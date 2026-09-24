@@ -1,0 +1,23 @@
+# E2E-specific game settings served to game-service.
+game:
+  rate-limit:
+    requests-per-minute: 1000
+  rules:
+    action-round-timer-seconds:
+      3: 8
+      4: 8
+      5: 8
+    hand-selection-timer-seconds:
+      3: 60
+      4: 45
+      5: 30
+    hand-deal-forced-types:
+      - TRACE
+      - NULLIFY
+      - SCAN
+      - STALL
+    # Bias forced SCAN deals toward grades that can target multiple events.
+    card-grade-weights:
+      I: 10
+      II: 50
+      III: 40
