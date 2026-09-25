@@ -374,6 +374,16 @@
                                         <browserE2e.manifestPath>${env.BROWSER_E2E_MANIFEST_PATH}</browserE2e.manifestPath>
                                         <browserE2e.tracesDir>${env.BROWSER_E2E_TRACES_DIR}</browserE2e.tracesDir>
                                     </systemPropertyVariables>
+                                    <!-- Each test owns its own Playwright, browser and game, so the
+                                         games play concurrently instead of back to back. -->
+                                    <properties>
+                                        <configurationParameters>
+                                            junit.jupiter.execution.parallel.enabled = true
+                                            junit.jupiter.execution.parallel.mode.default = concurrent
+                                            junit.jupiter.execution.parallel.config.strategy = fixed
+                                            junit.jupiter.execution.parallel.config.fixed.parallelism = 4
+                                        </configurationParameters>
+                                    </properties>
                                 </configuration>
                             </execution>
                         </executions>
