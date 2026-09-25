@@ -3,6 +3,7 @@ package io.github.temporalrift.systemtest.browser;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -16,7 +17,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInfo;
 
 /**
  * Deployed-browser evidence (infrastructure#47) that a complete normal game is playable end to end
@@ -29,12 +32,23 @@ import org.junit.jupiter.api.Test;
 class BrowserGameplayIT {
 
     private BrowserGameScenario scenario;
+    private Instant startedAt;
+
+    // Failsafe prints nothing per method, so a cancelled CI job would otherwise not show which game stalled.
+    @BeforeEach
+    void logStart(TestInfo testInfo) {
+        startedAt = Instant.now();
+        System.out.printf("[browser-e2e] %s started at %s%n", testInfo.getDisplayName(), startedAt);
+    }
 
     @AfterEach
-    void closeBrowser() {
+    void closeBrowser(TestInfo testInfo) {
         if (scenario != null) {
             scenario.close();
         }
+        System.out.printf(
+                "[browser-e2e] %s finished after %s%n",
+                testInfo.getDisplayName(), Duration.between(startedAt, Instant.now()));
     }
 
     @Test
