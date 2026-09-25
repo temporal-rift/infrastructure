@@ -79,7 +79,7 @@ An erasure request for a player must be followed through every carrier of player
 | `game.events.dlq`, `timeline.events.dlq`, `game.commands.dlq` | Same as above, on their own 30-day window. |
 | `game-service`'s database | Durable — does not expire on its own. Delete the player's rows from every table that references their player id (lobby membership, hand/selection state, action history, score records) via that service's own migrations/tooling; do not rely on retention. |
 | `timeline-service`'s database | Durable. Its event-sourced store retains `FutureEvent` history; delete or redact rows referencing the player's id the same way. |
-| `read-service`'s database | Durable. Delete the player's projection rows (game state, game history, player-game-state) the same way. |
+| `read-service`'s database | Durable. Delete the player's projection rows (game state, game history, player-game-state, lobby player names) the same way. |
 | Centralized logs (VictoriaLogs) | Durable but not indexed by player id — a targeted deletion requires a manual LogsQL query against the player's known identifiers (game/player UUIDs) followed by VictoriaLogs' own deletion API; there is no automatic per-player purge. |
 
 ## Shared configuration with Spring Cloud Config Server
