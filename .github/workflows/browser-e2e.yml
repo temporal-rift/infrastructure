@@ -64,8 +64,9 @@ jobs:
   browser-e2e:
     name: browser-e2e
     runs-on: ubuntu-latest
-    # ~9 min build/start-up plus four full games at ~5 min each.
-    timeout-minutes: 45
+    # Cold-cache image builds plus stack start-up (~8 min) and the four games run concurrently
+    # (~6-8 min).
+    timeout-minutes: 25
     # Every pull_request event reaches this job (see the `types` list above, needed so a label
     # added after the PR is open still triggers a run) but only actually executes it when the PR
     # carries the opt-in label, or the run came from workflow_dispatch/workflow_call instead.
@@ -140,25 +141,45 @@ jobs:
             exit 1
           fi
 
-      - name: Build service images
+      - name: Resolve image tags
         id: build
         run: |
-          game_service_tag="$(git -C game-service rev-parse --short HEAD)"
-          timeline_service_tag="$(git -C timeline-service rev-parse --short HEAD)"
-          read_service_tag="$(git -C read-service rev-parse --short HEAD)"
-          web_client_tag="$(git -C game-client rev-parse --short HEAD)"
-
-          docker build -t "temporal-rift/game-service:${game_service_tag}" ./game-service
-          docker build -t "temporal-rift/timeline-service:${timeline_service_tag}" ./timeline-service
-          docker build -t "temporal-rift/read-service:${read_service_tag}" ./read-service
-          docker build -t "temporal-rift/web-client:${web_client_tag}" ./game-client
-
           {
-            echo "game_service_tag=${game_service_tag}"
-            echo "timeline_service_tag=${timeline_service_tag}"
-            echo "read_service_tag=${read_service_tag}"
-            echo "web_client_tag=${web_client_tag}"
+            echo "game_service_tag=$(git -C game-service rev-parse --short HEAD)"
+            echo "timeline_service_tag=$(git -C timeline-service rev-parse --short HEAD)"
+            echo "read_service_tag=$(git -C read-service rev-parse --short HEAD)"
+            echo "web_client_tag=$(git -C game-client rev-parse --short HEAD)"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # All six images in parallel, with layers (notably each Maven/npm dependency download) cached
+      # across runs in the GitHub Actions cache.
+      - name: Build images
+        uses: docker/bake-action@018cb6412ab401ebaa809aa5f85966b74628600f # v7.4.0
+        with:
+          source: .
+          files: infrastructure/browser-e2e/docker-bake.hcl
+          load: true
+          vars: |
+            GAME_SERVICE_TAG=${{ steps.build.outputs.game_service_tag }}
+            TIMELINE_SERVICE_TAG=${{ steps.build.outputs.timeline_service_tag }}
+            READ_SERVICE_TAG=${{ steps.build.outputs.read_service_tag }}
+            WEB_CLIENT_TAG=${{ steps.build.outputs.web_client_tag }}
+          set: |
+            game-service.cache-from=type=gha,scope=browser-e2e-game-service
+            game-service.cache-to=type=gha,mode=max,ignore-error=true,scope=browser-e2e-game-service
+            timeline-service.cache-from=type=gha,scope=browser-e2e-timeline-service
+            timeline-service.cache-to=type=gha,mode=max,ignore-error=true,scope=browser-e2e-timeline-service
+            read-service.cache-from=type=gha,scope=browser-e2e-read-service
+            read-service.cache-to=type=gha,mode=max,ignore-error=true,scope=browser-e2e-read-service
+            web-client.cache-from=type=gha,scope=browser-e2e-web-client
+            web-client.cache-to=type=gha,mode=max,ignore-error=true,scope=browser-e2e-web-client
+            config-server.cache-from=type=gha,scope=browser-e2e-config-server
+            config-server.cache-to=type=gha,mode=max,ignore-error=true,scope=browser-e2e-config-server
+            e2e-tests.cache-from=type=gha,scope=browser-e2e-tests
+            e2e-tests.cache-to=type=gha,mode=max,ignore-error=true,scope=browser-e2e-tests
 
       - name: Bring up the browser-e2e deployment
         id: up
@@ -176,7 +197,7 @@ jobs:
         # diagnostics step from writing under target/.
         run: |
           mkdir -p target/browser-e2e-manifest target/browser-e2e-traces target/browser-e2e-diagnostics
-          docker compose -f docker-compose.e2e.yml up -d --build --wait --wait-timeout 300
+          docker compose -f docker-compose.e2e.yml up -d --wait --wait-timeout 300
 
       - name: Show container status
         if: failure() && steps.up.outcome == 'failure'

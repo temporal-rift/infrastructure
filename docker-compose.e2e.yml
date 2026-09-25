@@ -149,6 +149,9 @@ services:
       retries: 12
 
   config-server:
+    # Named so browser-e2e/docker-bake.hcl can prebuild it (CI does); `up --build` still builds it
+    # locally.
+    image: temporal-rift/browser-e2e-config-server:local
     build:
       context: ./config-server
     volumes:
@@ -332,6 +335,7 @@ services:
   # --- Test runner ---
 
   e2e-tests:
+    image: temporal-rift/browser-e2e-tests:local
     build:
       context: .
       dockerfile: browser-e2e/Dockerfile

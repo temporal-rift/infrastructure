@@ -62,7 +62,7 @@ final class BrowserPlayer implements AutoCloseable {
                 var screenshotsDir = Path.of(System.getProperty("browserE2e.tracesDir", "target/browser-e2e-traces"));
                 Files.createDirectories(screenshotsDir);
                 page.screenshot(
-                        new Page.ScreenshotOptions().setPath(screenshotsDir.resolve(name + "-sign-in-failure.png")));
+                        new Page.ScreenshotOptions().setPath(screenshotsDir.resolve(subject + "-sign-in-failure.png")));
             } catch (IOException | RuntimeException captureFailure) {
                 exception.addSuppressed(captureFailure);
             } finally {
@@ -112,7 +112,7 @@ final class BrowserPlayer implements AutoCloseable {
     @Override
     public void close() {
         var tracesDir = System.getProperty("browserE2e.tracesDir", "target/browser-e2e-traces");
-        var traceFile = Path.of(tracesDir, name + "-" + System.currentTimeMillis() + ".zip");
+        var traceFile = Path.of(tracesDir, subject + ".zip");
         // Unconditional, not "only on failure": Playwright's tracing API has no built-in signal for
         // whether the enclosing JUnit test failed, and always exporting a small trace zip is cheap.
         // capture-browser-e2e-diagnostics.sh bundles this directory; the CI workflow uploads that
