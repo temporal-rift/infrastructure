@@ -9,6 +9,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
+
 /**
  * Asserts private-view isolation the way the architecture notes insist it must be checked: against
  * the actual network payloads every context receives, not just what happens to be rendered — "hiding
@@ -26,6 +30,7 @@ final class IsolationCheck {
 
     private static final Pattern CARD_INSTANCE_ID =
             Pattern.compile("\"cardInstanceId\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     private IsolationCheck() {}
 
@@ -46,7 +51,7 @@ final class IsolationCheck {
                     continue;
                 }
                 for (var exchange : other.network().capturedExchanges()) {
-                    var body = exchange.responseBody();
+                    var body = withoutEarnedIntel(exchange.responseBody());
                     if (body == null) {
                         continue;
                     }
@@ -65,7 +70,7 @@ final class IsolationCheck {
     private static Set<String> cardInstanceIdsSeenBy(BrowserPlayer player) {
         Set<String> ids = new LinkedHashSet<>();
         for (var exchange : player.network().capturedExchanges()) {
-            var body = exchange.responseBody();
+            var body = withoutEarnedIntel(exchange.responseBody());
             if (body == null) {
                 continue;
             }
@@ -75,6 +80,23 @@ final class IsolationCheck {
             }
         }
         return ids;
+    }
+
+    // Intercept legitimately puts an opponent's real card instances in the caller's own
+    // myRevealedIntel; that is earned knowledge, not the caller's hand and not a leak.
+    private static String withoutEarnedIntel(String body) {
+        if (body == null) {
+            return null;
+        }
+        try {
+            if (JSON.readTree(body) instanceof ObjectNode state && state.has("myRevealedIntel")) {
+                state.remove("myRevealedIntel");
+                return JSON.writeValueAsString(state);
+            }
+        } catch (JacksonException _) {
+            // Not a JSON document (HTML, scripts); searched as-is.
+        }
+        return body;
     }
 
     /**
