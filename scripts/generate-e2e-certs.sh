@@ -10,6 +10,14 @@ set -euo pipefail
 out_dir="${1:?output directory argument required}"
 mkdir -p "$out_dir"
 
+# `compose run` re-starts completed one-shots; regenerating would rotate certs under services
+# already serving the old ones.
+complete_marker="$out_dir/.complete"
+if [ -f "$complete_marker" ]; then
+  echo "TLS material already present in $out_dir; keeping it."
+  exit 0
+fi
+
 gateway_host="app.e2e.test"
 issuer_host="auth.e2e.test"
 
@@ -30,4 +38,5 @@ rm -f "$out_dir/issuer-truststore.p12"
 keytool -importcert -noprompt -alias "$issuer_host" -file "$out_dir/issuer-cert.pem" \
   -keystore "$out_dir/issuer-truststore.p12" -storetype PKCS12 -storepass changeit
 
+touch "$complete_marker"
 echo "TLS material written to $out_dir."
