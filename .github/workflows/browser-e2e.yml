@@ -64,9 +64,8 @@ jobs:
   browser-e2e:
     name: browser-e2e
     runs-on: ubuntu-latest
-    # Temporarily short while this rewrite is still being debugged -- a hang shouldn't burn 45
-    # minutes to discover. Raise once a real run's actual duration is known.
-    timeout-minutes: 15
+    # ~9 min build/start-up plus four full games at ~5 min each.
+    timeout-minutes: 45
     # Every pull_request event reaches this job (see the `types` list above, needed so a label
     # added after the PR is open still triggers a run) but only actually executes it when the PR
     # carries the opt-in label, or the run came from workflow_dispatch/workflow_call instead.
