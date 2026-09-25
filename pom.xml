@@ -7,7 +7,7 @@
     <parent>
         <groupId>io.github.temporal-rift</groupId>
         <artifactId>temporal-rift-bom</artifactId>
-        <version>1.13.0</version>
+        <version>1.14.0</version>
         <relativePath/>
     </parent>
 
