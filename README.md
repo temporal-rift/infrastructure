@@ -458,20 +458,17 @@ export TIMELINE_SERVICE_TAG=$(git -C ../timeline-service rev-parse --short HEAD)
 export READ_SERVICE_TAG=$(git -C ../read-service rev-parse --short HEAD)
 export WEB_CLIENT_TAG=$(git -C ../game-client rev-parse --short HEAD)
 
-docker build -t temporal-rift/game-service:$GAME_SERVICE_TAG ../game-service
-docker build -t temporal-rift/timeline-service:$TIMELINE_SERVICE_TAG ../timeline-service
-docker build -t temporal-rift/read-service:$READ_SERVICE_TAG ../read-service
-docker build -t temporal-rift/web-client:$WEB_CLIENT_TAG ../game-client
+(cd .. && docker buildx bake --load -f infrastructure/browser-e2e/docker-bake.hcl)
 
-docker compose -f docker-compose.e2e.yml up -d --build
+docker compose -f docker-compose.e2e.yml up -d
 docker compose -f docker-compose.e2e.yml --profile test run --rm e2e-tests
 docker compose -f docker-compose.e2e.yml down -v
 ```
 
-`up -d --build` only builds the `e2e-tests` test-runner image and the local `cert-init`/`config-server` images —
-the four application images above are consumed via the pinned tags, not compiled by Compose. `.github/workflows/
-browser-e2e.yml` runs the identical sequence in CI (building the four images from its own sibling checkouts first),
-and uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace,
+`browser-e2e/docker-bake.hcl` builds all six images in parallel: the four application images, tagged by commit, plus
+the `config-server` and `e2e-tests` images Compose would otherwise build itself (`up -d --build` still works for
+those two if you skip the bake). `.github/workflows/browser-e2e.yml` runs the identical sequence in CI, caching the
+image layers across runs in the GitHub Actions cache, and uploads a `browser-e2e-diagnostics-*` artifact (Compose logs/state plus each scenario's Playwright trace,
 via `scripts/capture-browser-e2e-diagnostics.sh`) on failure only — bearer tokens and JWTs are redacted from logs
 and trace archives, then the bundle is checked for remaining credentials before it is written.
 
