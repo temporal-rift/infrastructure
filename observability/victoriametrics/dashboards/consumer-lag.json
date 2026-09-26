@@ -1,0 +1,31 @@
+{
+  "title": "Consumer lag",
+  "rows": [
+    {
+      "panels": [
+        {
+          "title": "Consumer group lag by partition",
+          "description": "kafka_consumergroup_lag per consumer group, topic, and partition. Alerts on KafkaConsumerGroupLagHigh (see observability/vmalert/rules.yml).",
+          "width": 12,
+          "expr": [
+            "kafka_consumergroup_lag"
+          ],
+          "alias": [
+            "{{consumergroup}} / {{topic}} / {{partition}}"
+          ]
+        },
+        {
+          "title": "Consumer group lag, summed by topic",
+          "description": "kafka_consumergroup_lag_sum per consumer group and topic, across all partitions.",
+          "width": 12,
+          "expr": [
+            "kafka_consumergroup_lag_sum"
+          ],
+          "alias": [
+            "{{consumergroup}} / {{topic}}"
+          ]
+        }
+      ]
+    }
+  ]
+}

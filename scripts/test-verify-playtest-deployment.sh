@@ -198,7 +198,7 @@ echo "Labeled test override passes."
 # Diagnostic exposure through the player entry point fails clearly.
 diagnostic_root="$fixtures_dir/diagnostic"
 setup_valid_deployment "$diagnostic_root"
-sed 's#proxy_pass http://playtest-game;#proxy_pass http://playtest-game;\n    proxy_pass http://grafana:3000;#' \
+sed 's#proxy_pass http://playtest-game;#proxy_pass http://playtest-game;\n    proxy_pass http://victoriametrics:8428;#' \
   "$repo_root/playtest/nginx.conf" > "$diagnostic_root/nginx.conf"
 PLAYTEST_NGINX_CONF="$diagnostic_root/nginx.conf" assert_failure_contains "must not proxy diagnostic" \
   run_validator "$diagnostic_root"

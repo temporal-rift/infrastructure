@@ -108,28 +108,15 @@ services:
     image: victoriametrics/victoria-metrics:v1.152.0
     command:
       - "-promscrape.config=/etc/victoriametrics/scrape.yml"
+      - "-vmui.customDashboardsPath=/etc/victoriametrics/dashboards"
     volumes:
       - ./observability/victoriametrics/scrape.yml:/etc/victoriametrics/scrape.yml:ro
+      - ./observability/victoriametrics/dashboards:/etc/victoriametrics/dashboards:ro
       - victoriametrics-data:/victoria-metrics-data
     ports:
       - "127.0.0.1:8428:8428"
     depends_on:
       kafka-exporter:
-        condition: service_started
-
-  grafana:
-    image: grafana/grafana:13.0.9
-    environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_AUTH_DISABLE_LOGIN_FORM: "true"
-    volumes:
-      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "127.0.0.1:3000:3000"
-    depends_on:
-      victoriametrics:
         condition: service_started
 
   alertmanager:
