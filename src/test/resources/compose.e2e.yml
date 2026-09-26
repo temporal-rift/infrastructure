@@ -44,9 +44,6 @@ services:
   victoriametrics:
     ports: !override []
 
-  grafana:
-    ports: !override []
-
   alertmanager:
     ports: !override []
 

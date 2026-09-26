@@ -24,8 +24,7 @@ endpoints.
 | Zipkin distributed traces | http://localhost:9411/zipkin/ |
 | Kafka UI | http://localhost:8083 |
 | Config Server | http://localhost:8888 |
-| Grafana dashboards | http://localhost:3000 |
-| VictoriaMetrics | http://localhost:8428 |
+| VictoriaMetrics and dashboards | http://localhost:8428/vmui/#/dashboards |
 | vmalert | http://localhost:8880 |
 | Alertmanager | http://localhost:9093 |
 
@@ -175,30 +174,30 @@ cross-service log view for this stack.
 
 The stack scrapes Kafka-broker-level metrics (via a `kafka-exporter` sidecar) into VictoriaMetrics today, and is
 already configured to also scrape each service's application metrics once available (see below), renders them on
-provisioned Grafana dashboards, and evaluates configuration-driven alert rules with vmalert. Config lives under
-`observability/` in this repository:
+dashboards in VictoriaMetrics' built-in UI (vmui), and evaluates configuration-driven alert rules with vmalert.
+Config lives under `observability/` in this repository:
 
 | Component | Config |
 |---|---|
 | VictoriaMetrics scrape targets | `observability/victoriametrics/scrape.yml` |
-| Grafana datasource/dashboard provisioning | `observability/grafana/provisioning/`, dashboards in `observability/grafana/dashboards/` |
+| vmui dashboards | `observability/victoriametrics/dashboards/` (loaded via `-vmui.customDashboardsPath`) |
 | Alert rules and thresholds | `observability/vmalert/rules.yml` |
 | Alertmanager routing | `observability/alertmanager/alertmanager.yml` |
 
 **Available today, no service-side change required** — `kafka-exporter` reads consumer-group and topic offsets
 directly from the broker, so these work as soon as the stack is up:
 
-- **Consumer lag**, by consumer group, topic, and partition (`kafka_consumergroup_lag`) — Grafana's "Consumer lag"
+- **Consumer lag**, by consumer group, topic, and partition (`kafka_consumergroup_lag`) — the "Consumer lag"
   dashboard, alerted by `KafkaConsumerGroupLagHigh` when a group's lag exceeds the threshold in `rules.yml`.
 - **Dead-letter traffic**, on `game.events.dlq`, `timeline.events.dlq`, and `game.commands.dlq`
-  (`kafka_topic_partition_current_offset`) — Grafana's "Dead-letter traffic" dashboard, alerted by
+  (`kafka_topic_partition_current_offset`) — the "Dead-letter traffic" dashboard, alerted by
   `KafkaDeadLetterTrafficDetected` on any offset increase.
 
 **Pending a linked cross-repo dependency** — `game-service`'s era-saga sweep-recovery counter and
 `timeline-service`'s and `read-service`'s Kafka consumer-skip counters already exist, but none of the three
 services yet expose a Prometheus scrape endpoint (`GET /actuator/prometheus`) — see
 [temporal-rift/infrastructure#37](https://github.com/temporal-rift/infrastructure/issues/37)'s Cross-Repo
-Dependencies, and the linked `game-service#200`, `timeline-service#101`, `read-service#88`. Grafana's "Version
+Dependencies, and the linked `game-service#200`, `timeline-service#101`, `read-service#88`. The "Version
 skips" and "Sweep recoveries" dashboards, and their scrape jobs in `scrape.yml`, are already wired to the correct
 metric names and will show data the moment each dependency lands — no dashboard or infra change needed then.
 
@@ -209,8 +208,8 @@ is not a code constant. Validate a rule change without a running broker:
 bash scripts/verify-alert-rules.sh
 ```
 
-This topology is intentionally development/showcase only, matching the rest of this stack's posture: Grafana runs
-with anonymous admin access enabled, and no component here integrates real paging (email, Slack, PagerDuty). A
+This topology is intentionally development/showcase only, matching the rest of this stack's posture: VictoriaMetrics, vmalert
+and Alertmanager run without authentication, and no component here integrates real paging (email, Slack, PagerDuty). A
 firing alert is observable through Alertmanager's own API (`GET http://localhost:9093/api/v2/alerts`), not
 delivered anywhere external. Do not expose these ports from a shared or production host without designing
 authentication and real notification routing first.

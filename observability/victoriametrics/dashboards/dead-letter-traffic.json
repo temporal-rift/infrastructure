@@ -1,0 +1,31 @@
+{
+  "title": "Dead-letter traffic",
+  "rows": [
+    {
+      "panels": [
+        {
+          "title": "Dead-letter topic offset",
+          "description": "kafka_topic_partition_current_offset for game.events.dlq, timeline.events.dlq, and game.commands.dlq. Any increase means a record was parked. Alerts on KafkaDeadLetterTrafficDetected (see observability/vmalert/rules.yml).",
+          "width": 12,
+          "expr": [
+            "kafka_topic_partition_current_offset{topic=~\".+\\\\.dlq\"}"
+          ],
+          "alias": [
+            "{{topic}} / {{partition}}"
+          ]
+        },
+        {
+          "title": "Dead-letter records parked (5m count)",
+          "description": "Count of each dead-letter topic's offset increase over a trailing 5-minute window (same increase() semantics as the KafkaDeadLetterTrafficDetected alert rule).",
+          "width": 12,
+          "expr": [
+            "increase(kafka_topic_partition_current_offset{topic=~\".+\\\\.dlq\"}[5m])"
+          ],
+          "alias": [
+            "{{topic}} / {{partition}}"
+          ]
+        }
+      ]
+    }
+  ]
+}

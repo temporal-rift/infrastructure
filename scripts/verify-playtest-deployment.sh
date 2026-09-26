@@ -138,7 +138,7 @@ generic_line="$(grep -n -E 'location +(\^~ +)?/api/' "$nginx_conf" | head -n1 | 
   || fail "$nginx_conf must route player state reads to read-service ahead of the generic /api/ gameplay route."
 
 proxy_targets="$(grep "proxy_pass" "$nginx_conf" || true)"
-if echo "$proxy_targets" | grep -q -E "kafka-ui|grafana|zipkin|config-server|victoriametrics|victorialogs|alertmanager|vmalert|kafka-exporter"; then
+if echo "$proxy_targets" | grep -q -E "kafka-ui|zipkin|config-server|victoriametrics|victorialogs|alertmanager|vmalert|kafka-exporter"; then
   fail "$nginx_conf must not proxy diagnostic or privileged interfaces through the player entry point."
 fi
 

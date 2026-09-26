@@ -1,0 +1,20 @@
+{
+  "title": "Sweep recoveries",
+  "rows": [
+    {
+      "panels": [
+        {
+          "title": "Era-saga sweep recoveries",
+          "description": "game_session_era_saga_scores_updated_recovery_total. No data until game-service exposes /actuator/prometheus -- see game-service#200 and infrastructure#37's Cross-Repo Dependencies.",
+          "width": 12,
+          "expr": [
+            "game_session_era_saga_scores_updated_recovery_total"
+          ],
+          "alias": [
+            "game-service"
+          ]
+        }
+      ]
+    }
+  ]
+}
