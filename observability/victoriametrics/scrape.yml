@@ -1,6 +1,6 @@
-# Prometheus-compatible scrape config read by VictoriaMetrics (-promscrape.config). An unreachable target (all
-# three application services today, until each exposes /actuator/prometheus -- see infrastructure#37) does not
-# block scraping the others; VictoriaMetrics reports it as a down target instead of failing the whole scrape cycle.
+# Prometheus-compatible scrape config read by VictoriaMetrics (-promscrape.config). An unreachable target (for
+# example a service that is not running) does not block scraping the others; VictoriaMetrics reports it as a down
+# target instead of failing the whole scrape cycle.
 global:
   scrape_interval: 15s
 
