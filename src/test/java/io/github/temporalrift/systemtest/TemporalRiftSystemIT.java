@@ -24,6 +24,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,11 +58,15 @@ class TemporalRiftSystemIT {
     private static final Set<String> TRACE_CONTINUITY_SERVICE_NAMES =
             Set.of("game-service", "timeline-service", "read-service");
 
-    // Player-targeting cards carry only targetPlayerId (no event/outcome fields) per action.yml's oneOf
-    // constraint. JAM is both player-targeting and round-three-ineligible; isPlayableThisRound already
-    // reflects that, so filtering on it handles the overlap without special-casing JAM here.
+    // Player-targeting cards carry only player targets (no event/outcome fields) per action.yml's oneOf
+    // constraint: NULLIFY a grade-sized targetPlayerIds list, the others a single targetPlayerId. JAM is both
+    // player-targeting and round-three-ineligible; isPlayableThisRound already reflects that, so filtering on
+    // it handles the overlap without special-casing JAM here.
     private static final Set<String> PLAYER_TARGETING_CARD_TYPES =
             Set.of("NULLIFY", "REDIRECT", "AMPLIFY", "JAM", "INTERCEPT");
+    // DECOY carries no target at all, only the disguise category the public round summary shows.
+    private static final String DECOY = "DECOY";
+    private static final String DECOY_DISGUISE = "PROBABILITY_SHIFTER";
     // SCAN carries a list of targetEventIds (action.yml's oneOf constraint), not the single
     // targetEventId/outcome fields every other event-targeting card uses -- generic single-event-target
     // helpers must exclude it rather than submit the wrong request shape.
@@ -260,6 +265,7 @@ class TemporalRiftSystemIT {
         private Actor mainScanner;
         private Actor victim;
         private Actor nullifyingPlayer;
+        private Actor bystander;
         private List<Actor> allPlayers;
         private int targetCount;
         private List<ActiveEvent> targetEvents;
@@ -300,7 +306,8 @@ class TemporalRiftSystemIT {
             mainScanner = setup.mainScanner();
             victim = setup.victim();
             nullifyingPlayer = setup.nullifyingPlayer();
-            allPlayers = List.of(mainScanner, victim, nullifyingPlayer);
+            bystander = setup.bystander();
+            allPlayers = List.of(mainScanner, victim, nullifyingPlayer, bystander);
 
             var mainScanCard = scanCard(setup.mainScannerState());
             targetCount = targetCountForGrade(mainScanCard.grade());
@@ -327,8 +334,12 @@ class TemporalRiftSystemIT {
 
             var nullifierStateRoundOne = awaitPlayerAtRound(nullifyingPlayer, gameId, 1);
             var nullifyCard = nullifyCard(nullifierStateRoundOne);
+            var nullifyTargets = Stream.of(victim, bystander)
+                    .limit(targetCountForGrade(nullifyCard.grade()))
+                    .map(Actor::playerId)
+                    .toList();
             scenario.as(nullifyingPlayer)
-                    .playCardTargetingPlayer(gameId, 1, 1, nullifyCard, victim.playerId())
+                    .playCardTargetingPlayers(gameId, 1, 1, nullifyCard, nullifyTargets)
                     .assertStatus(202);
 
             awaitRoundClosed(mainScanner, gameId, 1, 1, 3);
@@ -615,8 +626,15 @@ class TemporalRiftSystemIT {
     private static final int REPLAY_PROBABILITY_MARKER = 76;
     private static final int DEFAULT_PROBABILITY_MARKER = 70;
 
+    // The bystander never acts; it exists so a grade II Nullify, which must name two opponents, can take it as
+    // its second target instead of cancelling the main scanner's Scan.
     private record ScanScenarioSetup(
-            UUID gameId, Actor mainScanner, PlayerState mainScannerState, Actor victim, Actor nullifyingPlayer) {}
+            UUID gameId,
+            Actor mainScanner,
+            PlayerState mainScannerState,
+            Actor victim,
+            Actor nullifyingPlayer,
+            Actor bystander) {}
 
     // Forcing the SCAN *type* into every deal doesn't force its *grade* (WeightedCardDealer still rolls a
     // weighted grade per forced card), so which of the three players -- if any -- gets grade II/III is a
@@ -630,10 +648,15 @@ class TemporalRiftSystemIT {
             var scanner = Actor.named("Scanner " + attempt);
             var victimScanner = Actor.named("Victim scanner " + attempt);
             var nullifier = Actor.named("Nullifier " + attempt);
+            var bystander = Actor.named("Bystander " + attempt);
             var players = List.of(scanner, victimScanner, nullifier);
 
-            var gameId = startGameWithThreePlayers(scanner, victimScanner, nullifier);
-            dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseScanScenarioHand);
+            var gameId = startGameWithPlayers(scanner, List.of(victimScanner, nullifier, bystander));
+            dealAndSelectHand(
+                    gameId,
+                    List.of(scanner, victimScanner, nullifier, bystander),
+                    1,
+                    TemporalRiftSystemIT::chooseScanScenarioHand);
 
             var roundOneStates = players.stream()
                     .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtRound(player, gameId, 1)));
@@ -646,7 +669,7 @@ class TemporalRiftSystemIT {
                         .filter(player -> !player.equals(mainScanner))
                         .toList();
                 return new ScanScenarioSetup(
-                        gameId, mainScanner, qualifying.get().getValue(), others.get(0), others.get(1));
+                        gameId, mainScanner, qualifying.get().getValue(), others.get(0), others.get(1), bystander);
             }
         }
         throw new AssertionError("No player's forced SCAN resolved at grade II or III across "
@@ -673,7 +696,7 @@ class TemporalRiftSystemIT {
             case "I" -> 1;
             case "II" -> 2;
             case "III" -> 3;
-            default -> throw new IllegalArgumentException("Unknown SCAN grade: " + grade);
+            default -> throw new IllegalArgumentException("Unknown card grade: " + grade);
         };
     }
 
@@ -891,12 +914,14 @@ class TemporalRiftSystemIT {
 
         var card = eligible.getFirst();
         if (PLAYER_TARGETING_CARD_TYPES.contains(card.cardType())) {
-            var opponent = allPlayers.stream()
-                    .filter(candidate -> !candidate.equals(player))
-                    .findFirst()
-                    .orElseThrow();
+            playAgainstPlayers(player, gameId, eraNumber, roundNumber, card, opponentTargets(card, player, allPlayers))
+                    .assertStatus(202);
+            return;
+        }
+
+        if (DECOY.equals(card.cardType())) {
             scenario.as(player)
-                    .playCardTargetingPlayer(gameId, eraNumber, roundNumber, card, opponent.playerId())
+                    .playDecoy(gameId, eraNumber, roundNumber, card, DECOY_DISGUISE)
                     .assertStatus(202);
             return;
         }
@@ -1120,21 +1145,39 @@ class TemporalRiftSystemIT {
                 .findFirst();
         if (playerTargetingCard.isPresent()) {
             var card = playerTargetingCard.get();
-            scenario.as(player)
-                    .playCardTargetingPlayer(gameId, 1, roundNumber, card, UUID.randomUUID())
+            var targets = opponentTargets(card, player, allPlayers);
+            var forgedTargets = new ArrayList<>(targets);
+            forgedTargets.set(0, UUID.randomUUID());
+            playAgainstPlayers(player, gameId, 1, roundNumber, card, forgedTargets)
                     .assertStatus(404);
-            var opponent = allPlayers.stream()
-                    .filter(candidate -> !candidate.equals(player))
-                    .findFirst()
-                    .orElseThrow();
-            scenario.as(player)
-                    .playCardTargetingPlayer(gameId, 1, roundNumber, card, opponent.playerId())
-                    .assertStatus(202);
+            playAgainstPlayers(player, gameId, 1, roundNumber, card, targets).assertStatus(202);
             playerTargetingProbed[0] = true;
             return;
         }
 
         playEligibleCard(player, gameId, roundNumber, state);
+    }
+
+    // NULLIFY names as many distinct opponents as its grade allows; every other player-targeting card names one.
+    private static List<UUID> opponentTargets(Card card, Actor player, List<Actor> allPlayers) {
+        var count = "NULLIFY".equals(card.cardType()) ? targetCountForGrade(card.grade()) : 1;
+        var targets = allPlayers.stream()
+                .filter(candidate -> !candidate.equals(player))
+                .limit(count)
+                .map(Actor::playerId)
+                .toList();
+        assertThat(targets)
+                .as("%s at grade %s needs %d opponents", card.cardType(), card.grade(), count)
+                .hasSize(count);
+        return targets;
+    }
+
+    private JsonHttpClient.Response playAgainstPlayers(
+            Actor player, UUID gameId, int eraNumber, int roundNumber, Card card, List<UUID> targets) {
+        if ("NULLIFY".equals(card.cardType())) {
+            return scenario.as(player).playCardTargetingPlayers(gameId, eraNumber, roundNumber, card, targets);
+        }
+        return scenario.as(player).playCardTargetingPlayer(gameId, eraNumber, roundNumber, card, targets.getFirst());
     }
 
     private boolean probeRoundIneligibilityIfAvailable(Actor player, UUID gameId, int roundNumber, PlayerState state) {
@@ -1167,6 +1210,16 @@ class TemporalRiftSystemIT {
     }
 
     private void playEligibleCard(Actor player, UUID gameId, int roundNumber, PlayerState state) {
+        var decoy = state.hand().stream()
+                .filter(Card::isPlayableThisRound)
+                .filter(candidate -> DECOY.equals(candidate.cardType()))
+                .findFirst();
+        if (eligibleEventTargetingCards(state).isEmpty() && decoy.isPresent()) {
+            scenario.as(player)
+                    .playDecoy(gameId, 1, roundNumber, decoy.get(), DECOY_DISGUISE)
+                    .assertStatus(202);
+            return;
+        }
         var card = eligibleEventTargetingCard(state);
         var targetEvent = state.activeEvents().getFirst();
         var sourceOutcomeId = TWO_OUTCOME_CARD_TYPES.contains(card.cardType()) ? sourceOutcome(targetEvent) : null;
@@ -1193,6 +1246,7 @@ class TemporalRiftSystemIT {
                 .filter(Card::isPlayableThisRound)
                 .filter(candidate -> !PLAYER_TARGETING_CARD_TYPES.contains(candidate.cardType()))
                 .filter(candidate -> !MULTI_TARGET_CARD_TYPES.contains(candidate.cardType()))
+                .filter(candidate -> !DECOY.equals(candidate.cardType()))
                 .toList();
     }
 
@@ -1282,24 +1336,23 @@ class TemporalRiftSystemIT {
     }
 
     private UUID startGameWithThreePlayers(Actor host, Actor playerTwo, Actor playerThree) {
+        return startGameWithPlayers(host, List.of(playerTwo, playerThree));
+    }
+
+    private UUID startGameWithPlayers(Actor host, List<Actor> joiners) {
         var created = scenario.as(host).createLobby().assertStatus(201);
         var lobbyId = UUID.fromString(created.body().path("lobbyId").asText());
 
-        assertThat(scenario.as(playerTwo)
-                        .joinLobby(lobbyId)
-                        .assertStatus(200)
-                        .body()
-                        .path("currentPlayers")
-                        .size())
-                .isEqualTo(2);
-        assertThat(scenario.as(playerThree)
-                        .joinLobby(lobbyId)
-                        .assertStatus(200)
-                        .body()
-                        .path("currentPlayers")
-                        .size())
-                .isEqualTo(3);
-        scenario.as(playerTwo).startGame(lobbyId).assertStatus(403);
+        for (var i = 0; i < joiners.size(); i++) {
+            assertThat(scenario.as(joiners.get(i))
+                            .joinLobby(lobbyId)
+                            .assertStatus(200)
+                            .body()
+                            .path("currentPlayers")
+                            .size())
+                    .isEqualTo(i + 2);
+        }
+        scenario.as(joiners.getFirst()).startGame(lobbyId).assertStatus(403);
 
         var started = scenario.as(host).startGame(lobbyId).assertStatus(202);
         var gameId = UUID.fromString(started.body().path("gameId").asText());
