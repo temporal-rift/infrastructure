@@ -5,7 +5,7 @@
       "panels": [
         {
           "title": "Skip counts by service and reason",
-          "description": "timeline_kafka_consumer_skips_total and read_kafka_consumer_skips_total, by reason (unknown_type / unsupported_version) and consumer. No data until each service exposes /actuator/prometheus -- see infrastructure#37, timeline-service#101, read-service#88. game-service does not yet emit a skip counter -- see game-service#200 and infrastructure#37's Cross-Repo Dependencies.",
+          "description": "timeline_kafka_consumer_skips_total and read_kafka_consumer_skips_total, by reason (unknown_type / unsupported_version) and consumer.",
           "width": 12,
           "expr": [
             "timeline_kafka_consumer_skips_total",

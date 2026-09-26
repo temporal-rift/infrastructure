@@ -172,10 +172,9 @@ cross-service log view for this stack.
 
 ## Metrics, dashboards, and alerts
 
-The stack scrapes Kafka-broker-level metrics (via a `kafka-exporter` sidecar) into VictoriaMetrics today, and is
-already configured to also scrape each service's application metrics once available (see below), renders them on
-dashboards in VictoriaMetrics' built-in UI (vmui), and evaluates configuration-driven alert rules with vmalert.
-Config lives under `observability/` in this repository:
+The stack scrapes Kafka-broker-level metrics (via a `kafka-exporter` sidecar) and each service's application
+metrics into VictoriaMetrics, renders them on dashboards in VictoriaMetrics' built-in UI (vmui), and evaluates
+configuration-driven alert rules with vmalert. Config lives under `observability/` in this repository:
 
 | Component | Config |
 |---|---|
@@ -184,8 +183,7 @@ Config lives under `observability/` in this repository:
 | Alert rules and thresholds | `observability/vmalert/rules.yml` |
 | Alertmanager routing | `observability/alertmanager/alertmanager.yml` |
 
-**Available today, no service-side change required** — `kafka-exporter` reads consumer-group and topic offsets
-directly from the broker, so these work as soon as the stack is up:
+**Broker metrics**, read by `kafka-exporter` directly from the broker's consumer-group and topic offsets:
 
 - **Consumer lag**, by consumer group, topic, and partition (`kafka_consumergroup_lag`) — the "Consumer lag"
   dashboard, alerted by `KafkaConsumerGroupLagHigh` when a group's lag exceeds the threshold in `rules.yml`.
@@ -193,13 +191,11 @@ directly from the broker, so these work as soon as the stack is up:
   (`kafka_topic_partition_current_offset`) — the "Dead-letter traffic" dashboard, alerted by
   `KafkaDeadLetterTrafficDetected` on any offset increase.
 
-**Pending a linked cross-repo dependency** — `game-service`'s era-saga sweep-recovery counter and
-`timeline-service`'s and `read-service`'s Kafka consumer-skip counters already exist, but none of the three
-services yet expose a Prometheus scrape endpoint (`GET /actuator/prometheus`) — see
-[temporal-rift/infrastructure#37](https://github.com/temporal-rift/infrastructure/issues/37)'s Cross-Repo
-Dependencies, and the linked `game-service#200`, `timeline-service#101`, `read-service#88`. The "Version
-skips" and "Sweep recoveries" dashboards, and their scrape jobs in `scrape.yml`, are already wired to the correct
-metric names and will show data the moment each dependency lands — no dashboard or infra change needed then.
+**Application metrics**, scraped from each service's `GET /actuator/prometheus` (jobs in `scrape.yml`):
+
+- **Version skips** (`timeline_kafka_consumer_skips_total`, `read_kafka_consumer_skips_total`), by reason and
+  consumer — the "Version skips" dashboard.
+- **Sweep recoveries** (`game_session_era_saga_scores_updated_recovery_total`) — the "Sweep recoveries" dashboard.
 
 Change an alert threshold by editing `observability/vmalert/rules.yml` and restarting the `vmalert` container — it
 is not a code constant. Validate a rule change without a running broker:
