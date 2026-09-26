@@ -161,6 +161,26 @@ final class TemporalRiftScenario {
             return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
         }
 
+        // NULLIFY names one player at grade I and two distinct players at grade II, and carries no other target.
+        JsonHttpClient.Response playCardTargetingPlayers(
+                UUID gameId, int eraNumber, int roundNumber, Card card, List<UUID> targetPlayerIds) {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("actionType", "CARD");
+            body.put("cardInstanceId", card.cardInstanceId());
+            body.put("targetPlayerIds", targetPlayerIds);
+            return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
+        }
+
+        // DECOY carries no target, only the card category the round summary shows for it.
+        JsonHttpClient.Response playDecoy(
+                UUID gameId, int eraNumber, int roundNumber, Card card, String disguiseCategory) {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("actionType", "CARD");
+            body.put("cardInstanceId", card.cardInstanceId());
+            body.put("disguiseCategory", disguiseCategory);
+            return http.post(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/actions"), actor, body);
+        }
+
         // List-mode target transport: SCAN is the only card type that uses it, one to three distinct event
         // ids, and cannot carry any scalar/player/outcome field.
         JsonHttpClient.Response playCardTargetingEvents(
