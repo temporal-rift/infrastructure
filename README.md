@@ -18,6 +18,9 @@ partitions before the services start. Each service waits for a healthy Zipkin se
 spans are retained. Set `JWT_ISSUER_URI` to a reachable issuer before using authenticated game-service or read-service
 endpoints.
 
+Open [`portal/index.html`](portal/index.html) in a browser for a single entry point to every local UI below,
+with an indicator showing which ones currently respond.
+
 | Local UI | URL |
 |---|---|
 | VictoriaLogs centralized logs | http://localhost:9428/select/vmui |

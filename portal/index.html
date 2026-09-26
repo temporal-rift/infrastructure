@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Temporal Rift — local portal</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #1b1f24;
+      --muted: #5c6670;
+      --border: #dde1e6;
+      --up: #1f9d55;
+      --down: #c8372d;
+      --pending: #a0a8b0;
+      --accent: #3b5bdb;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111418;
+        --card: #1a1f25;
+        --text: #e6e9ec;
+        --muted: #98a2ad;
+        --border: #2b323a;
+        --accent: #7c93f0;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 2rem clamp(1rem, 4vw, 3rem);
+      font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    h1 { margin: 0; font-size: 1.5rem; }
+    header p { margin: 0.25rem 0 0; color: var(--muted); }
+    button {
+      font: inherit;
+      padding: 0.45rem 1rem;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: progress; }
+    main {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1rem;
+    }
+    section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+    }
+    h2 {
+      margin: 0 0 0.5rem;
+      font-size: 0.8rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      column-gap: 0.6rem;
+      padding: 0.45rem 0;
+      border-top: 1px solid var(--border);
+    }
+    li:first-child { border-top: none; }
+    .dot {
+      width: 0.65rem;
+      height: 0.65rem;
+      margin-top: 0.45rem;
+      border-radius: 50%;
+      background: var(--pending);
+    }
+    .dot.up { background: var(--up); }
+    .dot.down { background: var(--down); }
+    a { color: var(--text); font-weight: 600; text-decoration: none; }
+    a:hover { color: var(--accent); text-decoration: underline; }
+    .meta { grid-column: 2; color: var(--muted); font-size: 0.85rem; }
+    footer { margin-top: 1.5rem; color: var(--muted); font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Temporal Rift — local portal</h1>
+      <p>Every web UI of the local stack. A green dot means the address responds, not that the app is healthy.</p>
+    </div>
+    <button id="recheck" type="button">Recheck all</button>
+  </header>
+  <main id="groups"></main>
+  <footer>Start the stack with <code>docker compose up -d</code> from the infrastructure repository.</footer>
+
+  <script>
+    const GROUPS = [
+      {
+        title: "Game",
+        links: [
+          { name: "Game client (dev server)", url: "http://localhost:5173/", note: "npm run dev in game-client" },
+          { name: "Playtest", url: "http://localhost/", note: "compose.playtest.yml edge" },
+        ],
+      },
+      {
+        title: "Metrics and dashboards",
+        links: [
+          { name: "Dashboards", url: "http://localhost:8428/vmui/#/dashboards", note: "Consumer lag, dead-letter traffic, skips, sweeps" },
+          { name: "Metrics query (vmui)", url: "http://localhost:8428/vmui/", note: "VictoriaMetrics" },
+        ],
+      },
+      {
+        title: "Logs and traces",
+        links: [
+          { name: "Logs", url: "http://localhost:9428/select/vmui/", note: "VictoriaLogs" },
+          { name: "Traces", url: "http://localhost:9411/zipkin/", note: "Zipkin" },
+        ],
+      },
+      {
+        title: "Messaging",
+        links: [
+          { name: "Kafka UI", url: "http://localhost:8083/", note: "Topics, consumer groups, messages" },
+        ],
+      },
+      {
+        title: "Alerts",
+        links: [
+          { name: "Alertmanager", url: "http://localhost:9093/", note: "Firing alerts" },
+          { name: "vmalert", url: "http://localhost:8880/", note: "Rule evaluation" },
+        ],
+      },
+      {
+        title: "Services",
+        links: [
+          { name: "game-service health", url: "http://localhost:8080/actuator/health", note: "Port 8080" },
+          { name: "timeline-service health", url: "http://localhost:8081/actuator/health", note: "Port 8081" },
+          { name: "read-service health", url: "http://localhost:8082/actuator/health", note: "Port 8082" },
+          { name: "Config Server health", url: "http://localhost:8888/actuator/health", note: "Port 8888" },
+        ],
+      },
+    ];
+
+    const TIMEOUT_MS = 2500;
+    const container = document.getElementById("groups");
+    const recheckButton = document.getElementById("recheck");
+    const entries = [];
+
+    for (const group of GROUPS) {
+      const section = document.createElement("section");
+      const heading = document.createElement("h2");
+      heading.textContent = group.title;
+      const list = document.createElement("ul");
+      for (const link of group.links) {
+        const item = document.createElement("li");
+        const dot = document.createElement("span");
+        dot.className = "dot";
+        dot.title = "Not checked yet";
+        const anchor = document.createElement("a");
+        anchor.href = link.url;
+        anchor.target = "_blank";
+        anchor.rel = "noopener";
+        anchor.textContent = link.name;
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = `${link.note} · ${link.url}`;
+        item.append(dot, anchor, meta);
+        list.append(item);
+        entries.push({ url: link.url, dot });
+      }
+      section.append(heading, list);
+      container.append(section);
+    }
+
+    // A file:// page cannot read cross-origin responses; an opaque no-cors response still proves something answered.
+    async function responds(url) {
+      try {
+        await fetch(url, { mode: "no-cors", cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    async function checkAll() {
+      recheckButton.disabled = true;
+      await Promise.all(entries.map(async ({ url, dot }) => {
+        dot.className = "dot";
+        dot.title = "Checking…";
+        const up = await responds(url);
+        dot.className = up ? "dot up" : "dot down";
+        dot.title = up ? "Responds" : "No response";
+      }));
+      recheckButton.disabled = false;
+    }
+
+    recheckButton.addEventListener("click", checkAll);
+    checkAll();
+  </script>
+</body>
+</html>
