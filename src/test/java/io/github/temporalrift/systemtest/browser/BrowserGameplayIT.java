@@ -122,10 +122,14 @@ class BrowserGameplayIT {
         // allowing (or needing) a second submission.
         host.screen().submitFirstAvailableAction(false);
         BrowserGameScenario.waitUntil(host.screen()::hasSubmittedAction, "host's action is accepted before reload");
+        var gamePath = host.screen().currentPath();
         host.reload();
         BrowserGameScenario.waitUntil(
                 () -> host.screen().hasSubmittedAction() && !host.screen().hasOpenActionRound(),
                 "host's reloaded browser shows the same accepted decision, not a fresh open round");
+        assertThat(host.screen().currentPath())
+                .as("the reload keeps the host on the same game's page")
+                .isEqualTo(gamePath);
 
         // The second player submits normally; the third deliberately never submits this round, so
         // the round must close on its own accelerated (test-override) timeout, not deadlock.
@@ -200,10 +204,14 @@ class BrowserGameplayIT {
         // Intentionally no wait for hasSubmittedAction: the acknowledgement was withheld, so the
         // browser must recover the accepted decision from authoritative state after reload.
         host.page().unroute("**/eras/*/rounds/*/actions");
+        var gamePath = host.screen().currentPath();
         host.reload();
         BrowserGameScenario.waitUntil(
                 () -> host.screen().hasSubmittedAction() && !host.screen().hasOpenActionRound(),
                 "host's reloaded browser reconciles the same accepted decision, not a fresh open round");
+        assertThat(host.screen().currentPath())
+                .as("the reload keeps the host on the same game's page")
+                .isEqualTo(gamePath);
         assertThat(host.screen().submitFirstAvailableAction(false))
                 .as("the accepted action cannot be submitted or spent a second time")
                 .isEqualTo(GameScreen.ActionSubmission.NONE);
@@ -250,8 +258,12 @@ class BrowserGameplayIT {
         host.screen().startGame();
         for (var player : players) {
             BrowserGameScenario.waitUntil(
-                    player.screen()::hasGameStarted, "%s sees the game start".formatted(player.name()));
+                    player.screen()::isOnGamePage, "%s is moved to the game page".formatted(player.name()));
         }
+        var gamePath = host.screen().currentPath();
+        assertThat(players)
+                .as("every player lands on the page of the game the host started")
+                .allSatisfy(player -> assertThat(player.screen().currentPath()).isEqualTo(gamePath));
         return players;
     }
 

@@ -102,20 +102,15 @@ final class GameScreen {
                 .click();
     }
 
+    /** The path of the page this context is on, e.g. {@code /games/{gameId}}. */
+    String currentPath() {
+        return URI.create(page.url()).getPath();
+    }
+
     /** True once this context is on a game page ({@code /games/{gameId}}), where the client moves
      * every lobby member when the host starts. */
     boolean isOnGamePage() {
-        return GAME_PAGE_PATH.matcher(URI.create(page.url()).getPath()).matches();
-    }
-
-    /** True once this context's own screen reflects the game having started: it is on the game page,
-     * or it shows the lobby's "Game started." text or hand keep / an open action round (clients that
-     * predate per-page routes render everything on one screen). */
-    boolean hasGameStarted() {
-        return isOnGamePage()
-                || page.getByText("Game started.").count() > 0
-                || isHandKeepOffered()
-                || hasOpenActionRound();
+        return GAME_PAGE_PATH.matcher(currentPath()).matches();
     }
 
     // --- Seven-to-five hand keep -----------------------------------------
