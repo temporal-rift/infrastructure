@@ -15,8 +15,14 @@ Config Server, and the metrics/dashboards/alerting stack described below. It als
 `timeline.events`, `game.commands`, and one source-specific
 dead-letter topic for each of them, all with three
 partitions before the services start. Each service waits for a healthy Zipkin server before starting, so its startup
-spans are retained. Set `JWT_ISSUER_URI` to a reachable issuer before using authenticated game-service or read-service
-endpoints.
+spans are retained.
+
+The stack also runs a local interactive OIDC test issuer at `http://localhost:9000/default` that accepts any username.
+Every service accepts only tokens carrying that issuer and fetches its signing keys over the Compose network, so the
+browser and the services agree on one issuer without hosts-file changes. The playtest overlay below excludes it.
+
+To run the browser client against this stack, start `npm run dev` in the sibling `game-client` checkout; see its
+README. Its dev server routes API paths to the owning service the same way the playtest edge does.
 
 | Local UI | URL |
 |---|---|
@@ -27,6 +33,7 @@ endpoints.
 | VictoriaMetrics and dashboards | http://localhost:8428/vmui/#/dashboards |
 | vmalert | http://localhost:8880 |
 | Alertmanager | http://localhost:9093 |
+| Local OIDC issuer | http://localhost:9000/default/.well-known/openid-configuration |
 
 ## Kafka topic security, retention, and data lifecycle
 

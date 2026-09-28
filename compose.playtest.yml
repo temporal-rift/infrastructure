@@ -38,15 +38,25 @@ services:
   config-server:
     ports: !override []
 
+  # Local sign-in only; playtest authenticates against its external issuer.
+  identity-provider:
+    profiles: [local-issuer]
+
   game-service:
     ports: !override []
     environment:
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the reachable playtest OIDC issuer}"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+    depends_on:
+      identity-provider: !reset null
 
   timeline-service:
     ports: !override []
     environment:
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the reachable playtest OIDC issuer}"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+    depends_on:
+      identity-provider: !reset null
 
   read-service:
     ports: !override []
@@ -54,6 +64,9 @@ services:
       replicas: 1
     environment:
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the reachable playtest OIDC issuer}"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+    depends_on:
+      identity-provider: !reset null
 
   playtest-edge:
     image: nginx:1.27-alpine
