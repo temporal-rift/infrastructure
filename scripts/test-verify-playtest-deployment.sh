@@ -43,7 +43,16 @@ setup_valid_deployment() {
   write_pom "$root/services/read-service"
   mkdir -p "$root/config-repo" "$root/dist"
   echo "game: {}" > "$root/config-repo/application.yml"
-  echo "game: {}" > "$root/config-repo/game-service.yml"
+  # Minimal served score rules: the validator requires the reveal-based Expose delta and
+  # rejects the retired behavior-change key. The digest writer records whatever file is
+  # here, so fixtures stay internally consistent.
+  cat > "$root/config-repo/game-service.yml" <<'EOF'
+game:
+  rules:
+    scoring:
+      score-deltas:
+        EXPOSE_SIGNATURE_REVEALED: 2
+EOF
   echo "game: {}" > "$root/config-repo/timeline-service.yml"
   echo "game: {}" > "$root/config-repo/read-service.yml"
   echo "events: []" > "$root/catalog.yml"
@@ -167,6 +176,48 @@ setup_valid_deployment "$drift_root"
 echo "game: {drifted: true}" >> "$drift_root/config-repo/game-service.yml"
 assert_failure_contains "digest does not match" \
   run_validator "$drift_root"
+
+# Missing reveal-based Expose score delta fails clearly, without touching the manifest
+# digests: rewrite the served file and the manifest together so only the score check fails.
+expose_missing_root="$fixtures_dir/expose-missing"
+setup_valid_deployment "$expose_missing_root"
+cat > "$expose_missing_root/config-repo/game-service.yml" <<'EOF'
+game:
+  rules:
+    scoring:
+      score-deltas:
+        CHAIN_COMPLETED: 10
+EOF
+PLAYTEST_SERVICES_DIR="$expose_missing_root/services" \
+  PLAYTEST_CONFIG_REPO="$expose_missing_root/config-repo" \
+  PLAYTEST_CATALOG="$expose_missing_root/catalog.yml" \
+  PLAYTEST_CLIENT_DIST="$expose_missing_root/dist" \
+  PLAYTEST_TIMING_PRESET="normal" \
+  JWT_ISSUER_URI="https://issuer.example" \
+  bash "$writer" "$expose_missing_root/manifest.json" >/dev/null
+assert_failure_contains "must supply EXPOSE_SIGNATURE_REVEALED: 2" \
+  run_validator "$expose_missing_root"
+
+# Retired behavior-change Expose key fails clearly even alongside the reveal-based key.
+expose_retired_root="$fixtures_dir/expose-retired"
+setup_valid_deployment "$expose_retired_root"
+cat > "$expose_retired_root/config-repo/game-service.yml" <<'EOF'
+game:
+  rules:
+    scoring:
+      score-deltas:
+        EXPOSE_SIGNATURE_REVEALED: 2
+        EXPOSE_CHANGED_PLAYER_BEHAVIOR: 2
+EOF
+PLAYTEST_SERVICES_DIR="$expose_retired_root/services" \
+  PLAYTEST_CONFIG_REPO="$expose_retired_root/config-repo" \
+  PLAYTEST_CATALOG="$expose_retired_root/catalog.yml" \
+  PLAYTEST_CLIENT_DIST="$expose_retired_root/dist" \
+  PLAYTEST_TIMING_PRESET="normal" \
+  JWT_ISSUER_URI="https://issuer.example" \
+  bash "$writer" "$expose_retired_root/manifest.json" >/dev/null
+assert_failure_contains "must not contain the retired EXPOSE_CHANGED_PLAYER_BEHAVIOR" \
+  run_validator "$expose_retired_root"
 
 # Silent test overrides fail clearly.
 override_root="$fixtures_dir/override"

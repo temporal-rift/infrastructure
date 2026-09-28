@@ -266,4 +266,16 @@ for pin in session-event action-event timeline-event scoring-event session-api a
     || fail "manifest $pin '$(manifest_value "$pin")' does not match the deployed POM pin '$expected': regenerate the manifest for this deployment."
 done
 
+# --- Score rules ---
+# game-service binds game.rules.scoring.score-deltas to its score-reason enum and refuses to
+# start with a missing reason. The Expose score is reveal-based: EXPOSE_SIGNATURE_REVEALED +2.
+# The retired behavior-change key must not come back under either ruleset.
+score_file="$config_repo/game-service.yml"
+[[ -f "$score_file" ]] || fail "score rules not found at $score_file."
+grep -Eq '^[[:space:]]*EXPOSE_SIGNATURE_REVEALED:[[:space:]]*2([[:space:]]*(#.*)?)?$' "$score_file" \
+  || fail "$score_file must supply EXPOSE_SIGNATURE_REVEALED: 2: the reveal-based Expose score delta."
+grep -Eq '^[[:space:]]*EXPOSE_CHANGED_PLAYER_BEHAVIOR:' "$score_file" \
+  && fail "$score_file must not contain the retired EXPOSE_CHANGED_PLAYER_BEHAVIOR key: game-service scores Expose via EXPOSE_SIGNATURE_REVEALED." \
+  || true
+
 echo "Playtest deployment inputs valid (timingPreset=$timing_preset)."
