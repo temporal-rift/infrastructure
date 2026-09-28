@@ -274,8 +274,10 @@ score_file="$config_repo/game-service.yml"
 [[ -f "$score_file" ]] || fail "score rules not found at $score_file."
 grep -Eq '^[[:space:]]*EXPOSE_SIGNATURE_REVEALED:[[:space:]]*2([[:space:]]*(#.*)?)?$' "$score_file" \
   || fail "$score_file must supply EXPOSE_SIGNATURE_REVEALED: 2: the reveal-based Expose score delta."
-grep -Eq '^[[:space:]]*EXPOSE_CHANGED_PLAYER_BEHAVIOR:' "$score_file" \
-  && fail "$score_file must not contain the retired EXPOSE_CHANGED_PLAYER_BEHAVIOR key: game-service scores Expose via EXPOSE_SIGNATURE_REVEALED." \
-  || true
+# Unanchored on comment-stripped content so a flow-style reintroduction (e.g. inside
+# `score-deltas: {...}`) cannot slip past a line-initial match.
+if grep -v '^[[:space:]]*#' "$score_file" | grep -q 'EXPOSE_CHANGED_PLAYER_BEHAVIOR'; then
+  fail "$score_file must not contain the retired EXPOSE_CHANGED_PLAYER_BEHAVIOR key: game-service scores Expose via EXPOSE_SIGNATURE_REVEALED."
+fi
 
 echo "Playtest deployment inputs valid (timingPreset=$timing_preset)."
