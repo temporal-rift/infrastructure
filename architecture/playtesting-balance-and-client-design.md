@@ -429,7 +429,8 @@ Initially, a dedicated playtest stack can run one immutable ruleset at a time, w
 | Deals and special budgets | Category weights 35/25/25/15; grade weights 60/30/10; once-era Annihilate/Seal/Corrupt/Mimic; optional forced types; stabilization winners Prophets/Weavers. | Same session properties. Forced types are a scenario aid; the faction winner list is a coarse policy rather than a configurable objective engine. |
 | Probability magnitudes | Grades I/II/III: Push +10/+20/+30, Suppress −10/−20/−30, Swing 15/30/45, Amplify ×1.5/×2/×3; low band up to 30, medium up to 60. | Shared `game.rules.probability` namespace; Game Java `action/infrastructure/adapter/out/config/ScoringRulesProperties.java` and Timeline Java `infrastructure/adapter/out/config/TimelineRulesProperties.java` bind the fields they need. Keep one coherent effective bundle across both owners. |
 | Timeline limits and Activist effects | Weight floor 0, ceiling 90; Momentum +10; Rally ×1.5. | Timeline rules properties validate grade completeness, magnitudes, bounds and redistribution feasibility. Candidate configurations must pass those checks before experiments. |
-| Score values | Annihilation of a leading outcome +3, corruption +2; written +4, Fulfillment +8, wrong written −2; secret outcome +4, unidentified +6, Mimic +2; chain link +2, completion +10, break −3; Rally declaration +8, ordinary declaration +4, Expose +2; cascade −2. | Game Java `scoring/infrastructure/adapter/out/config/ScoreRulesProperties.java` requires the complete reason map in `game.rules.scoring.score-deltas`. Signed totals are supported; do not impose a zero floor in analytics. |
+| Score values | Annihilation of a leading outcome +3, corruption +2; written +4, Fulfillment +8, wrong written −2; secret outcome +4, unidentified +6, Mimic +2; chain link +2, completion +10, break −3; Rally declaration +6, Momentum declaration +5, Expose +2; cascade −2. | Game Java `scoring/infrastructure/adapter/out/config/ScoreRulesProperties.java` requires the complete reason map in `game.rules.scoring.score-deltas`. Signed totals are supported; do not impose a zero floor in analytics. |
+| Faction objectives | Eraser 4 leading annihilations; Prophet 4 written resolutions; Revisionist 3 winning eras; Weaver 3-link chain; Activist 3 consecutive successful declarations. With the default scores each objective is met while its own entries total below 20 (12, 16, 12, 16, 16–18). | Game Java `scoring/infrastructure/adapter/out/config/VictoryRulesProperties.java` binds `game.rules.victory`; the objective predicates themselves are rule logic, not configuration. |
 | Human timing | Selection and action rounds: 60/45/30 seconds for 3/4/5 players; reconnect grace 30 seconds; paradox resolution 60 seconds. | Session properties and Timeline Java `infrastructure/adapter/out/config/ParadoxResolutionRulesProperties.java`. Record timing presets separately when interpreting pacing and timeout effects. |
 | Operational timing | Saga/selection/round/reconnect/scoring and paradox sweeps generally 1 second; resubmission intervals are separate operational settings. | Service timer configuration. These affect delivery responsiveness and resource usage, not the game's nominal decision budget; distinguish them from balance parameters. |
 | Content and structural behavior | Thirty catalog events with three baseline outcomes each; card categories/supported grades, target legality, three action rounds, Round-2 band publication, effect priority and maximum-weight resolution are encoded in content or Java behavior. | `game-service/src/main/resources/future-events.yml`; Game Java `shared/domain/model/CardType.java`, `action/domain/actionround/SubmittedAction.java`, session/action sagas; Timeline Java `application/command/ReplayRoundActionsCommandHandler.java` and `domain/futureevent/FutureEvent.java`. They are not freely interchangeable numeric configuration. |
@@ -586,6 +587,19 @@ No throughput claim is made here. If measured CPU cost is `c` seconds/game, `N` 
 | Gameplay quality | Comprehension, tension, frustration, waiting, perceived fairness and willingness to replay. | Equal win rates can coexist with forced choices, opaque cascades or boring play. |
 
 Prioritize outcome-slot bias and card-versus-repeatable-special opportunity cost early. Test the baseline `33/33/34` and maximum-weight rule together, rather than varying only deck order. Track chain/objective feasibility against the maximum-era horizon, and declaration success against opponent information and counterplay.
+
+The default objective thresholds and declaration scores are tuned so every faction objective is a distinct route to
+victory, met before the entries that advance it alone reach 20 points, and so Rally and Momentum each pay best in some
+situation (Rally on a likely outcome, Momentum's +10 opening on an outcome below roughly an even chance). These are
+arithmetic targets, not play evidence. Playtests validate them with:
+
+- Win share by faction and by **exact faction set**, not only by player count.
+- Era of victory per faction, and the share of normal victories won by the score threshold versus the faction
+  objective (both can qualify at the same boundary; record each).
+- For the Prophet, written resolutions versus Fulfillment use among winners; for the Activist, Rally versus Momentum
+  choice when Momentum is eligible, success rate and score by mode, and streak length reached.
+- For the Eraser, the era the fourth leading annihilation lands and how often a Round 1 Annihilate on the initial
+  `34` outcome is cancelled; the threshold route is effectively closed to Erasers without the objective.
 
 ### 9.2 What existing facts can support
 
