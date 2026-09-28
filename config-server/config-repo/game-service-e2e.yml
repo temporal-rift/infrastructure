@@ -16,6 +16,8 @@ game:
       - NULLIFY
       - SCAN
       - STALL
+      # Keeps two scalar-event cards available for the round-2 duplicate probe without an early Stall.
+      - PUSH
     # Bias forced SCAN deals toward grades that can target multiple events.
     card-grade-weights:
       I: 10

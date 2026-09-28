@@ -768,10 +768,7 @@ class TemporalRiftSystemIT {
                         .isFalse());
     }
 
-    // Keeps SCAN, STALL, and NULLIFY -- all four forced types except TRACE are relevant to this scenario, and
-    // every player's deal offers all four (hand-deal-forced-types in the E2E Config Server profile) -- plus filler
-    // cards that
-    // this scenario never plays, to reach the required five-card selection.
+    // Every deal includes the three cards needed for the Scan, Stall, and Nullify interactions.
     private static List<UUID> chooseScanScenarioHand(List<Card> offer) {
         var kept = new ArrayList<Card>();
         for (var type : List.of("SCAN", "STALL", "NULLIFY")) {
@@ -907,7 +904,11 @@ class TemporalRiftSystemIT {
     // skipped, letting the round's own timer close it, exactly as production allows.
     private void playAnyEligibleAction(
             Actor player, List<Actor> allPlayers, UUID gameId, int eraNumber, int roundNumber, PlayerState state) {
-        var eligible = state.hand().stream().filter(Card::isPlayableThisRound).toList();
+        // An early Stall locks this target for later rounds; the dedicated Scan scenario covers that interaction.
+        var eligible = state.hand().stream()
+                .filter(Card::isPlayableThisRound)
+                .filter(card -> !"STALL".equals(card.cardType()) || roundNumber == 3)
+                .toList();
         if (eligible.isEmpty()) {
             return;
         }
@@ -1242,11 +1243,13 @@ class TemporalRiftSystemIT {
     }
 
     private static List<Card> eligibleEventTargetingCards(PlayerState state) {
+        // Keep generic lifecycle targets available until the final action round.
         return state.hand().stream()
                 .filter(Card::isPlayableThisRound)
                 .filter(candidate -> !PLAYER_TARGETING_CARD_TYPES.contains(candidate.cardType()))
                 .filter(candidate -> !MULTI_TARGET_CARD_TYPES.contains(candidate.cardType()))
                 .filter(candidate -> !DECOY.equals(candidate.cardType()))
+                .filter(candidate -> !"STALL".equals(candidate.cardType()) || "ACTION_ROUND_3".equals(state.phase()))
                 .toList();
     }
 
