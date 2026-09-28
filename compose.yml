@@ -1,5 +1,11 @@
 name: temporal-rift
 
+# Tokens carry the browser-visible issuer; inside the network localhost is each container itself,
+# so services fetch the signing keys from the issuer's service name instead of discovering them.
+x-local-issuer-environment: &local-issuer-environment
+  JWT_ISSUER_URI: http://localhost:9000/default
+  SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://identity-provider:8080/default/jwks
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -145,17 +151,25 @@ services:
       alertmanager:
         condition: service_started
 
+  # Interactive OIDC test issuer for local sign-in; any username is accepted.
+  identity-provider:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    environment:
+      JSON_CONFIG: '{"interactiveLogin":true}'
+    ports:
+      - "127.0.0.1:9000:8080"
+
   game-service:
     build:
       context: ../game-service
     environment:
+      <<: *local-issuer-environment
       SPRING_PROFILES_ACTIVE: docker
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/game_service
       SPRING_DATASOURCE_USERNAME: temporal_rift
       SPRING_DATASOURCE_PASSWORD: temporal_rift
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
-      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://host.docker.internal:9000}
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
@@ -173,6 +187,8 @@ services:
         condition: service_started
       config-server:
         condition: service_healthy
+      identity-provider:
+        condition: service_started
     logging:
       driver: syslog
       options:
@@ -184,12 +200,12 @@ services:
     build:
       context: ../timeline-service
     environment:
+      <<: *local-issuer-environment
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/timeline_service
       SPRING_DATASOURCE_USERNAME: temporal_rift
       SPRING_DATASOURCE_PASSWORD: temporal_rift
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
-      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://host.docker.internal:9000}
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
@@ -207,6 +223,8 @@ services:
         condition: service_started
       config-server:
         condition: service_healthy
+      identity-provider:
+        condition: service_started
     logging:
       driver: syslog
       options:
@@ -218,12 +236,12 @@ services:
     build:
       context: ../read-service
     environment:
+      <<: *local-issuer-environment
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/read_service
       SPRING_DATASOURCE_USERNAME: temporal_rift
       SPRING_DATASOURCE_PASSWORD: temporal_rift
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_SECURITY_PROTOCOL: PLAINTEXT
-      JWT_ISSUER_URI: ${JWT_ISSUER_URI:-http://host.docker.internal:9000}
       ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       CONFIG_SERVER_URI: http://config-server:8888
       CONSOLE_LOG_STRUCTURED_FORMAT: logstash
@@ -241,6 +259,8 @@ services:
         condition: service_started
       config-server:
         condition: service_healthy
+      identity-provider:
+        condition: service_started
     logging:
       driver: syslog
       options:
