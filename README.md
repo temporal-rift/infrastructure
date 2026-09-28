@@ -356,7 +356,7 @@ new deployable domain service in this topology.
 
 | Player route | Owner |
 |---|---|
-| `GET /` (static client, SPA fallback) | `playtest-edge` |
+| `GET /` and the client's pages (`/lobby`, `/lobbies/{lobbyId}`, `/games/{gameId}`, `/auth/callback`) — static client, SPA fallback | `playtest-edge` |
 | `GET /api/v1/games/{gameId}/state`, `/history` | read-service (single instance) |
 | `GET /api/v1/games/{gameId}/chains` | timeline-service |
 | All other `/api/` gameplay routes (lobbies, hand selection, actions, paradox resolution, scores) | game-service |
@@ -371,6 +371,10 @@ observability UIs, Kafka UI, and the Config Server return 404 through the player
 - The three services checked out as siblings (the layout Compose's `../<service>` build contexts require).
 - A reachable OIDC issuer (all services honor `JWT_ISSUER_URI`; issuers without standard discovery additionally
   need their `SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI` wired per service).
+- A client registered with that issuer for the browser client, with exactly one redirect URI,
+  `https://<playtest-host>/auth/callback`, and one post-logout redirect URI, `https://<playtest-host>/`. The client
+  returns players to the page they signed in from through the sign-in `state`, so no wildcard or per-page URI is
+  needed. The local and browser-e2e mock issuers accept any redirect URI.
 - A TLS certificate and key for the playtest host.
 - The built static client: from the sibling browser-client checkout, configure `VITE_API_BASE_URL` to the
   playtest origin itself (same-origin routing), plus `VITE_OIDC_ISSUER_URL`/`VITE_OIDC_CLIENT_ID`/

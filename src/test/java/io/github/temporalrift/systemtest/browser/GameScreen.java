@@ -1,5 +1,6 @@
 package io.github.temporalrift.systemtest.browser;
 
+import java.net.URI;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -10,10 +11,12 @@ import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.AriaRole;
 
 /**
- * Page object over {@code game-client}'s single continuously-updating screen: every panel (lobby,
- * action round, paradox resolution, knowledge, results) is a labeled {@code <section>} that
- * appears or disappears in place rather than a distinct route, so this class exposes one accessor
- * per section rather than one class per "page". Every locator here targets the accessible
+ * Page object over {@code game-client}'s player pages: the lobby ({@code /lobby},
+ * {@code /lobbies/{lobbyId}}) and the game ({@code /games/{gameId}}). Within each page every panel
+ * (lobby, action round, paradox resolution, knowledge, results) is a labeled {@code <section>} that
+ * appears or disappears in place, so this class exposes one accessor per section; a scenario only
+ * ever needs the sections of the page its player is on, and the client moves players from the lobby
+ * to the game page itself when the host starts. Every locator here targets the accessible
  * role/label/text the real component tree already exposes (confirmed by reading
  * {@code SignInPanel}, {@code LobbyPanel}, {@code ActionPanel}, {@code ParadoxResolutionPanel},
  * {@code ResultsPanel} on {@code game-client}'s main branch) — no {@code data-testid} hooks exist
@@ -34,6 +37,7 @@ final class GameScreen {
     // tick. safeInnerText/safeIsEnabled catch exactly that timeout and report "not ready yet".
     private static final int PROBE_TIMEOUT_MS = 2000;
     private static final long RESULTS_REFRESH_INTERVAL_NANOS = TimeUnit.SECONDS.toNanos(10);
+    private static final Pattern GAME_PAGE_PATH = Pattern.compile("/games/[A-Za-z0-9_-]+");
 
     private final Page page;
     private long lastResultsRefreshNanos;
@@ -98,15 +102,20 @@ final class GameScreen {
                 .click();
     }
 
-    void waitForGameStarted() {
-        page.getByText("Game started.").waitFor();
+    /** True once this context is on a game page ({@code /games/{gameId}}), where the client moves
+     * every lobby member when the host starts. */
+    boolean isOnGamePage() {
+        return GAME_PAGE_PATH.matcher(URI.create(page.url()).getPath()).matches();
     }
 
-    /** True once this context's own screen reflects the game having started, whether it is still
-     * showing the lobby's "Game started." transition text or has already advanced to hand keep or
-     * an open action round (recovered state after a reload can skip straight past the former). */
+    /** True once this context's own screen reflects the game having started: it is on the game page,
+     * or it shows the lobby's "Game started." text or hand keep / an open action round (clients that
+     * predate per-page routes render everything on one screen). */
     boolean hasGameStarted() {
-        return page.getByText("Game started.").count() > 0 || isHandKeepOffered() || hasOpenActionRound();
+        return isOnGamePage()
+                || page.getByText("Game started.").count() > 0
+                || isHandKeepOffered()
+                || hasOpenActionRound();
     }
 
     // --- Seven-to-five hand keep -----------------------------------------
