@@ -1,6 +1,5 @@
 package io.github.temporalrift.systemtest.browser;
 
-import java.net.URI;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
@@ -102,9 +101,12 @@ final class GameScreen {
                 .click();
     }
 
-    /** The path of the page this context is on, e.g. {@code /games/{gameId}}. */
+    /** The path of the page this context is on, e.g. {@code /games/{gameId}}. Read from the page itself
+     * rather than {@code page.url()}: Playwright Java applies navigation events only while a call into
+     * Playwright is running, so inside a polling predicate that makes no other call {@code page.url()}
+     * keeps returning the path from before a client-side navigation. */
     String currentPath() {
-        return URI.create(page.url()).getPath();
+        return String.valueOf(page.evaluate("() => window.location.pathname"));
     }
 
     /** True once this context is on a game page ({@code /games/{gameId}}), where the client moves
