@@ -40,9 +40,9 @@ game:
       I: 60
       II: 30
       III: 10
-    stabilization-winner-factions:
-      - PROPHETS
-      - WEAVERS
+    stabilization:
+      prophet-written-resolutions: 3
+      weaver-active-chain-links: 2
     once-era-budgeted-specials:
       - ANNIHILATE
       - SEAL
