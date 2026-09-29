@@ -1,11 +1,9 @@
 # Served only to the Config Client whose spring.application.name is timeline-service, layered on top of
-# application.yml's shared game.rules.probability namespace. Timeline-service binds these at startup and
-# fails fast when a required key is absent, so every key its properties class requires must be present here.
+# application.yml's shared game.rules.probability namespace (which serves the floor and ceiling). Timeline-service
+# binds these at startup and fails fast when a required key is absent from the combined served configuration.
 game:
   rules:
     probability:
-      floor: 0
-      ceiling: 90
       momentum-bonus: 10
       rally-multiplier: 1.5
       thread-shift: 10

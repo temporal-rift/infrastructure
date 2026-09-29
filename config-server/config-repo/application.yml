@@ -6,6 +6,8 @@ game:
   rules:
     max-eras: 5
     probability:
+      floor: 0
+      ceiling: 90
       push-shift:
         I: 10
         II: 20
