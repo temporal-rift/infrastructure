@@ -56,13 +56,18 @@ class BrowserGameplayIT {
         scenario = new BrowserGameScenario();
         var players = signInAndStartLobby("Host", "Second", "Third");
 
-        driveGameToResults(players, false);
+        var coverage = driveGameToResults(players, false);
 
         for (var player : players) {
             assertThat(player.screen().finalScoreCount())
                     .as("%s's browser shows every player's authoritative final score", player.name())
                     .isEqualTo(players.size());
         }
+        // Rounds also close on their own timeout, so final scores alone cannot tell a player who
+        // acted from one whose clicks never landed.
+        assertThat(coverage.cardActors())
+                .as("every player submits an ordinary card action through the browser")
+                .containsAll(players.stream().map(BrowserPlayer::name).toList());
         IsolationCheck.assertHandsStayPrivate(players);
         IsolationCheck.assertEarnedKnowledgeStaysPrivate(players);
         assertTimingIsRecordedAsATestOverride();
