@@ -53,6 +53,19 @@ final class GameScreen {
         }
     }
 
+    /** Clicks within the probe timeout. A timed choice (action round, paradox resolution) can close
+     * between checking a control and clicking it, and the client then re-renders without it: report
+     * that as "not clicked" so the caller's polling loop retries against the current state, instead
+     * of blocking on Playwright's 30s default and failing the whole scenario. */
+    private static boolean safeClick(Locator locator) {
+        try {
+            locator.click(new Locator.ClickOptions().setTimeout(PROBE_TIMEOUT_MS));
+            return true;
+        } catch (TimeoutError _) {
+            return false;
+        }
+    }
+
     private static boolean safeIsEnabled(Locator locator) {
         try {
             return locator.isEnabled(new Locator.IsEnabledOptions().setTimeout(PROBE_TIMEOUT_MS));
@@ -196,11 +209,11 @@ final class GameScreen {
             if (!safeIsEnabled(option)) {
                 continue;
             }
-            option.click();
-            resolveTargetIfPresent(section);
+            if (!safeClick(option) || !resolveTargetIfPresent(section)) {
+                return ActionSubmission.NONE;
+            }
             if (safeIsEnabled(confirm)) {
-                confirm.click();
-                return actionType;
+                return safeClick(confirm) ? actionType : ActionSubmission.NONE;
             }
         }
         return ActionSubmission.NONE;
@@ -214,42 +227,41 @@ final class GameScreen {
         return safeInnerText(page.locator("[aria-label='Your faction'] strong"));
     }
 
-    private void resolveTargetIfPresent(Locator section) {
+    /** Picks the first valid target, if the chosen card or special needs one. Returns false when a
+     * control disappeared mid-selection (the round closed), so the caller abandons this attempt. */
+    private boolean resolveTargetIfPresent(Locator section) {
         var targetPicker = section.getByLabel("Choose a target");
         if (targetPicker.count() == 0) {
-            return;
+            return true;
         }
         var eventButtons = targetPicker.getByLabel("Events").locator(":scope > li > button");
         if (eventButtons.count() > 0) {
-            eventButtons.first().click();
+            if (!safeClick(eventButtons.first())) {
+                return false;
+            }
             var sourceOutcome = firstEnabled(targetPicker.locator("ul[aria-label$='source outcomes'] button"));
             if (sourceOutcome != null) {
-                sourceOutcome.click();
+                if (!safeClick(sourceOutcome)) {
+                    return false;
+                }
                 var targetOutcomes = targetPicker.locator("ul[aria-label$='target outcomes'] button");
                 var targetOutcome = firstEnabled(targetOutcomes);
-                if (targetOutcome != null) {
-                    targetOutcome.click();
-                }
-            } else {
-                var outcomeButton = firstEnabled(targetPicker.locator("ul[aria-label$='outcomes'] button"));
-                if (outcomeButton != null) {
-                    outcomeButton.click();
-                } else {
-                    var confirm = section.getByRole(
-                            AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm action"));
-                    for (int i = 1; i < eventButtons.count() && !safeIsEnabled(confirm); i++) {
-                        if (safeIsEnabled(eventButtons.nth(i))) {
-                            eventButtons.nth(i).click();
-                        }
-                    }
+                return targetOutcome == null || safeClick(targetOutcome);
+            }
+            var outcomeButton = firstEnabled(targetPicker.locator("ul[aria-label$='outcomes'] button"));
+            if (outcomeButton != null) {
+                return safeClick(outcomeButton);
+            }
+            var confirm = section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm action"));
+            for (int i = 1; i < eventButtons.count() && !safeIsEnabled(confirm); i++) {
+                if (safeIsEnabled(eventButtons.nth(i)) && !safeClick(eventButtons.nth(i))) {
+                    return false;
                 }
             }
-            return;
+            return true;
         }
         var playerButton = firstEnabled(targetPicker.getByLabel("Players").locator("button"));
-        if (playerButton != null) {
-            playerButton.click();
-        }
+        return playerButton == null || safeClick(playerButton);
     }
 
     private Locator firstEnabled(Locator candidates) {
@@ -285,19 +297,19 @@ final class GameScreen {
 
     void submitFirstEligibleParadoxChoice() {
         var section = paradoxSection();
-        section.getByLabel("Eligible resolution cards")
+        if (!safeClick(section.getByLabel("Eligible resolution cards")
                 .locator("button")
-                .first()
-                .click();
-        var outcome = firstEnabled(section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button"));
-        if (outcome == null) {
+                .first())) {
             return;
         }
-        outcome.click();
+        var outcome = firstEnabled(section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button"));
+        if (outcome == null || !safeClick(outcome)) {
+            return;
+        }
         var confirm =
                 section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"));
         if (safeIsEnabled(confirm)) {
-            confirm.click();
+            safeClick(confirm);
         }
     }
 
