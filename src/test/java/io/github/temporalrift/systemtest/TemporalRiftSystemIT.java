@@ -514,17 +514,20 @@ class TemporalRiftSystemIT {
                     mainScanner,
                     gameId,
                     candidate -> candidate.eraNumber() == 2
-                            && candidate.pendingHand().size() == 7,
+                            && candidate.pendingHand().size() == 7
+                            && !candidate.activeEvents().isEmpty(),
                     mainScanner.name() + " reaches the era-2 deal");
             assertThat(afterEra.revealedIntel())
                     .as("scan intel is cleared once era 1 ends")
                     .isEmpty();
 
             // Kafka-boundary fault injection: a stale prior-era reveal delivered after the era boundary must
-            // never resurrect intel into the now-current era's state. Sampled repeatedly across the window for
-            // the same reason as the Nullify-suppression step -- a single read after a delay can't prove the
-            // state stays empty for the rest of the window.
+            // never resurrect intel into the now-current era's state. This runs inside the era-2 hand-selection
+            // window, so it proves the absence by ordering rather than by waiting: a current-era marker for the
+            // bystander follows on the same gameId-keyed partition, and once it is visible the stale reveal
+            // before it has been consumed.
             var staleEvent = targetEvents.getFirst();
+            var markerEvent = afterEra.activeEvents().getFirst();
             try (var injector = new KafkaFaultInjector()) {
                 injector.publishProbabilityStateRevealed(
                         UUID.randomUUID(),
@@ -534,16 +537,30 @@ class TemporalRiftSystemIT {
                         mainScanner.playerId(),
                         staleEvent.eventId(),
                         fabricatedOutcomes(staleEvent, DEFAULT_PROBABILITY_MARKER));
+                injector.publishProbabilityStateRevealed(
+                        UUID.randomUUID(),
+                        gameId,
+                        2,
+                        1,
+                        bystander.playerId(),
+                        markerEvent.eventId(),
+                        fabricatedOutcomes(markerEvent, DEFAULT_PROBABILITY_MARKER));
             }
-            assertNeverTrue(
-                    () -> PlayerState.from(scenario.as(mainScanner)
+            scenario.awaitPlayerState(
+                    bystander,
+                    gameId,
+                    candidate -> candidate
+                            .probabilityIntelFor(markerEvent.eventId())
+                            .map(entry -> matchesFabricatedOutcomes(entry, markerEvent, DEFAULT_PROBABILITY_MARKER))
+                            .orElse(false),
+                    bystander.name() + " observes the current-era marker published after the stale reveal");
+            assertThat(PlayerState.from(scenario.as(mainScanner)
                                     .getPlayerState(gameId)
                                     .assertStatus(200)
                                     .body())
-                            .probabilityIntelFor(staleEvent.eventId())
-                            .isPresent(),
-                    "a delayed prior-era reveal must not resurrect intel across the era boundary",
-                    Duration.ofSeconds(15));
+                            .probabilityIntelFor(staleEvent.eventId()))
+                    .as("a delayed prior-era reveal must not resurrect intel across the era boundary")
+                    .isEmpty();
         }
 
         // Era 2's round 2 is left genuinely actionless -- nobody submits anything, so it closes purely on its
