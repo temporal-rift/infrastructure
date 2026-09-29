@@ -99,7 +99,7 @@ image rebuild) is enough to serve an updated value, since the native backend re-
 
 It serves the card-grade probability magnitude table and probability-band thresholds under one namespace,
 `game.rules.probability.*` — `push-shift`, `suppress-shift`, and `swing-shift`, each a map keyed by card grade
-(`I`/`II`/`III`), plus `amplify-multiplier` and the band/floor threshold fields. Both `game-service` and
+(`I`/`II`/`III`), plus `amplify-multiplier`, the band thresholds, and the probability `floor` and `ceiling`. Both `game-service` and
 `timeline-service` bind this same namespace directly; each service's own `@ConfigurationProperties` class
 declares only the fields it needs (e.g. `game-service` has no use for `amplify-multiplier`, since `AMPLIFY`
 never shifts its band preview) and Spring simply ignores the rest — there is exactly one served copy of these
