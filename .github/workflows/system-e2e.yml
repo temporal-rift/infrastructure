@@ -5,6 +5,8 @@ name: System E2E
 # The Compose topology builds service images from sibling directories (`../game-service` and friends),
 # so all four repositories are checked out side by side, mirroring the developer workspace layout
 # documented in README.md. That way CI runs the same command a developer runs locally.
+#
+# Not triggered by pull requests or pushes: epic-e2e.yml calls it when an epic closes, and it can be dispatched by hand.
 
 on:
   workflow_call:
@@ -46,9 +48,6 @@ on:
         required: false
         type: string
         default: ''
-  pull_request:
-  push:
-    branches: [ main ]
 
 permissions:
   contents: read
@@ -59,7 +58,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Stable job name — branch protection's required check points at "system-e2e".
   system-e2e:
     name: system-e2e
     runs-on: ubuntu-latest
@@ -192,50 +190,9 @@ jobs:
           done) &
           echo $! > monitor.pid
 
-      # Fetches the base ref's history so SonarCloud's PR analysis (below) can diff against it. Only
-      # needed when infrastructure's own commit is under test — see the Sonar step's condition.
-      - name: Fetch base branch for SonarCloud PR analysis
-        if: github.repository == 'temporal-rift/infrastructure' && github.event_name == 'pull_request'
-        working-directory: infrastructure
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: git fetch --no-tags origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-
-      - name: Cache SonarQube packages
-        if: github.repository == 'temporal-rift/infrastructure'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
-        with:
-          path: ~/.sonar/cache
-          key: ${{ runner.os }}-sonar
-          restore-keys: ${{ runner.os }}-sonar
-
-      # `sonar.coverage.exclusions=**/*` (pom.xml) keeps this module out of the coverage metric
-      # entirely: it's a black-box system-test harness, not a service with meaningful unit-testable
-      # production code, so a coverage percentage here doesn't mean anything. Sonar still runs for
-      # code smells/bugs/security. Only runs when infrastructure's own commit is under test: under
-      # workflow_call from a sibling service's PR, this repository's checked-out ref is just `main`
-      # (see "Check out infrastructure" above), so analyzing it here would be redundant/stale and
-      # SONAR_TOKEN wouldn't be scoped for that caller anyway.
       - name: Run system E2E
         working-directory: infrastructure
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_PR_KEY: ${{ github.event.pull_request.number }}
-          SONAR_PR_BRANCH: ${{ github.head_ref }}
-          SONAR_PR_BASE: ${{ github.base_ref }}
-        run: |
-          GOALS=(--batch-mode verify -Pe2e)
-          if [[ "$GITHUB_REPOSITORY" == "temporal-rift/infrastructure" ]]; then
-            GOALS+=(sonar:sonar)
-            if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-              GOALS+=(
-                "-Dsonar.pullrequest.key=$SONAR_PR_KEY"
-                "-Dsonar.pullrequest.branch=$SONAR_PR_BRANCH"
-                "-Dsonar.pullrequest.base=$SONAR_PR_BASE"
-              )
-            fi
-          fi
-          mvn "${GOALS[@]}"
+        run: mvn --batch-mode verify -Pe2e
 
       # For a test failure, Failsafe's verify goal (which actually fails the build) runs at the
       # `verify` phase, after post-integration-test's capture-e2e-diagnostics has already written

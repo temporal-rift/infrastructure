@@ -3,12 +3,13 @@ name: Security E2E
 # Runs the authenticated, least-privilege Kafka topology proof (`mvn verify -Psecurity-e2e`), for
 # infrastructure#38. Independent of system-e2e.yml: it boots compose.secure.yml, a wholly separate
 # standalone stack with no application-service dependency, so unlike system-e2e this workflow needs
-# no sibling-repository checkouts and is not invoked via workflow_call.
+# no sibling-repository checkouts.
+#
+# Not triggered by pull requests or pushes: epic-e2e.yml calls it when an epic closes, and it can be dispatched by hand.
 
 on:
-  pull_request:
-  push:
-    branches: [ main ]
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read

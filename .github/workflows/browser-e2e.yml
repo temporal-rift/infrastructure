@@ -5,11 +5,7 @@ name: Browser E2E
 # against a declarative Compose deployment of the whole system under test, under accelerated,
 # explicitly labeled test-override timing. Independent of system-e2e.yml and security-e2e.yml.
 #
-# Unlike system-e2e.yml and security-e2e.yml, this does NOT run on every pull_request: building
-# five container images and a complete multi-round game lifecycle make it far slower than either.
-# It runs only when a PR carries the `run-browser-e2e` label (add the label, or re-push once it's
-# already there, to opt that PR in), via manual workflow_dispatch, or via another workflow's
-# workflow_call.
+# Not triggered by pull requests: epic-e2e.yml calls it when an epic closes, and it can be dispatched by hand.
 #
 # Needs a fourth sibling checkout system-e2e.yml does not: game-client, whose image this
 # deployment serves as web-client.
@@ -48,8 +44,6 @@ on:
         required: false
         type: string
         default: ''
-  pull_request:
-    types: [ opened, synchronize, reopened, labeled ]
 
 permissions:
   contents: read
@@ -67,10 +61,6 @@ jobs:
     # Cold-cache image builds plus stack start-up (~8 min) and the four games run concurrently
     # (~6-8 min).
     timeout-minutes: 25
-    # Every pull_request event reaches this job (see the `types` list above, needed so a label
-    # added after the PR is open still triggers a run) but only actually executes it when the PR
-    # carries the opt-in label, or the run came from workflow_dispatch/workflow_call instead.
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-browser-e2e')
 
     steps:
       - name: Validate service/ref inputs

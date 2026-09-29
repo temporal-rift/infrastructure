@@ -1,0 +1,55 @@
+name: Epic E2E
+
+# Runs every end-to-end suite against all repositories' default branches when an epic closes. A per-PR run can
+# only test one change against the other repositories' unchanged `main`, so a change spanning repositories fails
+# until all of its parts merge; an epic's close is the point where all of its work is on `main` together.
+
+on:
+  issues:
+    types: [ closed ]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Epics closed close together queue rather than cancel each other: each deserves its own verdict.
+  group: epic-e2e-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  system-e2e:
+    if: contains(github.event.issue.labels.*.name, 'epic')
+    uses: ./.github/workflows/system-e2e.yml
+
+  browser-e2e:
+    if: contains(github.event.issue.labels.*.name, 'epic')
+    uses: ./.github/workflows/browser-e2e.yml
+
+  security-e2e:
+    if: contains(github.event.issue.labels.*.name, 'epic')
+    uses: ./.github/workflows/security-e2e.yml
+
+  report:
+    needs: [ system-e2e, browser-e2e, security-e2e ]
+    if: always() && contains(github.event.issue.labels.*.name, 'epic')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      # Work that does not pass end to end is not done, so anything short of three passes reopens the epic.
+      - name: Report the result on the epic
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EPIC: ${{ github.event.issue.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SYSTEM: ${{ needs.system-e2e.result }}
+          BROWSER: ${{ needs.browser-e2e.result }}
+          SECURITY: ${{ needs.security-e2e.result }}
+        run: |
+          summary="system-e2e: ${SYSTEM}, browser-e2e: ${BROWSER}, security-e2e: ${SECURITY}"
+          if [[ "$SYSTEM" == success && "$BROWSER" == success && "$SECURITY" == success ]]; then
+            gh issue comment "$EPIC" --body "End-to-end verification passed on every default branch (${summary}): ${RUN_URL}"
+          else
+            gh issue reopen "$EPIC" --comment "End-to-end verification did not pass on the default branches (${summary}), so this epic is reopened until it does: ${RUN_URL}"
+          fi
