@@ -7,10 +7,7 @@ game:
       3: 8
       4: 8
       5: 8
-    hand-selection-timer-seconds:
-      3: 60
-      4: 45
-      5: 30
+    hand-selection-timer-seconds: 15
     hand-deal-forced-types:
       - TRACE
       - NULLIFY
