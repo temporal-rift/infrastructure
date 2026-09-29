@@ -151,11 +151,15 @@ services:
       alertmanager:
         condition: service_started
 
-  # Interactive OIDC test issuer for local sign-in; any username is accepted.
+  # Interactive OIDC test issuer for local sign-in; any username is accepted and becomes both sub and
+  # preferred_username. `$$` escapes the issuer's own ${subject} template from Compose interpolation.
   identity-provider:
-    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.3
     environment:
-      JSON_CONFIG: '{"interactiveLogin":true}'
+      JSON_CONFIG: >-
+        {"interactiveLogin":true,
+        "tokenCallbacks":[{"issuerId":"default","requestMappings":[
+        {"requestParam":"subject","match":".*","claims":{"preferred_username":"$${subject}"}}]}]}
     ports:
       - "127.0.0.1:9000:8080"
 

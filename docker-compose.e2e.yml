@@ -174,9 +174,14 @@ services:
   # required for the browser to complete an actual redirect login. Network alias is the literal
   # issuer value every side must agree on -- see README.md's OIDC section.
   identity-provider:
-    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.3
     environment:
-      JSON_CONFIG: '{"interactiveLogin":true,"httpServer":{"type":"NettyWrapper","ssl":{"keyPassword":"browser-e2e","keystoreFile":"/tls/issuer-keystore.p12","keystorePassword":"browser-e2e","keystoreType":"PKCS12"}}}'
+      # The login username becomes both sub and preferred_username, as in compose.yml.
+      JSON_CONFIG: >-
+        {"interactiveLogin":true,
+        "httpServer":{"type":"NettyWrapper","ssl":{"keyPassword":"browser-e2e","keystoreFile":"/tls/issuer-keystore.p12","keystorePassword":"browser-e2e","keystoreType":"PKCS12"}},
+        "tokenCallbacks":[{"issuerId":"default","requestMappings":[
+        {"requestParam":"subject","match":".*","claims":{"preferred_username":"$${subject}"}}]}]}
     networks:
       default:
         aliases: [auth.e2e.test]
