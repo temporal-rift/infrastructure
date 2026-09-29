@@ -254,33 +254,21 @@ short-lived tokens accepted by the isolated `e2e-auth` container and must never 
 
 ### Continuous enforcement
 
-`.github/workflows/system-e2e.yml` runs the same `mvn verify -Pe2e` command automatically. It checks out
+`.github/workflows/system-e2e.yml` runs the same `mvn verify -Pe2e` command in CI. It checks out
 `infrastructure`, `game-service`, `timeline-service` and `read-service` as sibling directories — the layout Compose's
 `../<service>` build contexts require — so CI builds the services exactly as they are in version control.
 
-It triggers four ways:
+End-to-end suites do not run on pull requests or pushes. A per-PR run can only test one change against the other
+repositories' unchanged `main`, so a change spanning repositories fails until all of its parts merge. Instead,
+`.github/workflows/epic-e2e.yml` runs `system-e2e`, `browser-e2e`, and `security-e2e` against every repository's
+default branch when an issue labelled `epic` closes. It comments the result on the epic and reopens the epic when any
+suite does not pass. Label every epic `epic` when creating it.
 
 | Trigger | Sources used |
 |---|---|
-| Pull request or push to `main` in this repo | this repo at the triggering commit, the three services at `main` |
-| `workflow_call` with `service` and `ref` | the named service at that ref, the other repositories at `main` |
-| `workflow_call` with no inputs | every repository at `main` |
-| Manual `workflow_dispatch`, with `service` and `ref` | the named service at that ref, the other repositories at `main` — for ad-hoc runs outside any pull request |
-
-A service repository invokes it like this:
-
-```yaml
-jobs:
-  system-e2e:
-    uses: temporal-rift/infrastructure/.github/workflows/system-e2e.yml@main
-    with:
-      service: game-service
-      ref: ${{ github.sha }}
-```
-
-The job is named `system-e2e`; branch protection's required check points at that name. Note this is a repository
-**setting**, not something the workflow file can assert — it has to be applied once in repository settings after the
-workflow has a green run on `main`.
+| An `epic`-labelled issue closes (`epic-e2e.yml`) | every repository at `main` |
+| Manual `workflow_dispatch`, with `service` and `ref` | the named service at that ref, the other repositories at `main` — to check a branch on demand |
+| Manual `workflow_dispatch` with `service` left as `all` | every repository at `main` |
 
 On failure the run publishes a `system-e2e-diagnostics-*` artifact containing the Compose logs for all services,
 the container state at failure, and the Failsafe/Surefire reports — enough to identify which service and which
@@ -479,10 +467,7 @@ image layers across runs in the GitHub Actions cache, and uploads a `browser-e2e
 via `scripts/capture-browser-e2e-diagnostics.sh`) on failure only — bearer tokens and JWTs are redacted from logs
 and trace archives, then the bundle is checked for remaining credentials before it is written.
 
-Unlike `system-e2e.yml`/`security-e2e.yml`, this workflow does not run on every pull request — building five
-container images and a complete multi-round game lifecycle makes it too slow for that. It runs only on a pull
-request carrying the `run-browser-e2e` label, via manual `workflow_dispatch`, or via another workflow's
-`workflow_call`.
+Like the other end-to-end suites, it runs when an epic closes (`epic-e2e.yml`) or via manual `workflow_dispatch`.
 
 `cert-init` generates a self-signed HTTPS certificate for the gateway (`app.e2e.test`) and the identity provider
 (`auth.e2e.test`), plus a Java truststore the three backend services trust it through — see
