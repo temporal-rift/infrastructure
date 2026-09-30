@@ -4,10 +4,13 @@
 # PKI generation only -- no manifest, no readiness checks. See docker-compose.e2e.yml's comments
 # for why those are separate services.
 #
-# Usage: generate-e2e-certs.sh <output-dir>
+# Usage: generate-e2e-certs.sh <output-dir> <issuer-uid>
 set -euo pipefail
 
 out_dir="${1:?output directory argument required}"
+# The identity provider runs as a non-root user; its keystore holds a private key, so hand it
+# over rather than making it world-readable.
+issuer_uid="${2:?identity provider uid argument required}"
 mkdir -p "$out_dir"
 
 # `compose run` re-starts completed one-shots; regenerating would rotate certs under services
@@ -15,6 +18,7 @@ mkdir -p "$out_dir"
 complete_marker="$out_dir/.complete"
 if [ -f "$complete_marker" ]; then
   echo "TLS material already present in $out_dir; keeping it."
+  chown "$issuer_uid" "$out_dir/issuer-keystore.p12"
   exit 0
 fi
 
@@ -32,6 +36,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
   -subj "/CN=${issuer_host}" -addext "subjectAltName=DNS:${issuer_host}"
 openssl pkcs12 -export -inkey "$out_dir/issuer-key.pem" -in "$out_dir/issuer-cert.pem" \
   -out "$out_dir/issuer-keystore.p12" -passout pass:browser-e2e
+chown "$issuer_uid" "$out_dir/issuer-keystore.p12"
 
 echo "Generating the backend services' Java truststore (trusts the identity provider's cert)..."
 rm -f "$out_dir/issuer-truststore.p12"

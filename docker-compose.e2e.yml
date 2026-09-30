@@ -46,7 +46,8 @@ services:
       - -c
       - |
         apt-get update -qq && apt-get install -y -qq --no-install-recommends openssl >/dev/null
-        bash /scripts/generate-e2e-certs.sh /certs
+        # 65532: the non-root user identity-provider's image runs as.
+        bash /scripts/generate-e2e-certs.sh /certs 65532
 
   # mock-oauth2-server (identity-provider, below) is a distroless Jib build with no shell, wget, or
   # curl, so it cannot run a native Docker healthcheck. This polls its discovery endpoint from
