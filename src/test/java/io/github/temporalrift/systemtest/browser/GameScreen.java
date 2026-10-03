@@ -191,7 +191,16 @@ final class GameScreen {
         var fallback = preferSpecial
                 ? submitFirstCompletableOption(section, cards, ActionSubmission.CARD)
                 : submitFirstCompletableOption(section, specials, ActionSubmission.SPECIAL);
-        return fallback != ActionSubmission.NONE ? fallback : submitPass();
+        if (fallback != ActionSubmission.NONE) {
+            return fallback;
+        }
+        // Missing controls or unfinished targets mean retry, not an implicit decision to pass.
+        return section.getByLabel("Hand").count() == 1
+                        && section.getByLabel("Faction specials").count() == 1
+                        && firstEnabled(cards) == null
+                        && firstEnabled(specials) == null
+                ? submitPass()
+                : ActionSubmission.NONE;
     }
 
     ActionSubmission submitPass() {
@@ -314,7 +323,11 @@ final class GameScreen {
         var section = paradoxSection();
         var confirm =
                 section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"));
-        var card = firstEnabled(section.getByLabel("Eligible resolution cards").getByRole(AriaRole.BUTTON));
+        var offer = section.getByLabel("Eligible resolution cards");
+        if (offer.count() != 1) {
+            return;
+        }
+        var card = firstEnabled(offer.getByRole(AriaRole.BUTTON));
         if (card != null) {
             if (!safeClick(card)) {
                 return;
@@ -323,8 +336,8 @@ final class GameScreen {
                     firstEnabled(section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button"));
             if (outcome != null && safeClick(outcome) && safeIsEnabled(confirm)) {
                 safeClick(confirm);
-                return;
             }
+            return;
         }
         if (safeClick(section.getByRole(
                         AriaRole.BUTTON,

@@ -132,6 +132,68 @@ class GameScreenIT {
     }
 
     @Test
+    void incompleteCardTargetsRetryWithoutPassingThenSubmitWhenReady() {
+        actionBoard("<fieldset aria-label=\"Choose a target\"><ul aria-label=\"Players\"></ul></fieldset>");
+        assertThat(screen.submitFirstAvailableAction(false)).isEqualTo(GameScreen.ActionSubmission.NONE);
+        assertThat(screen.hasSubmittedAction()).isFalse();
+        assertThat(page.locator("#confirm").isEnabled()).isFalse();
+        page.getByLabel("Players").evaluate("""
+                element => element.innerHTML = `<li><button onclick="pick('opponent', 1)">Opponent</button></li>`
+                """);
+        assertThat(screen.submitFirstAvailableAction(false)).isEqualTo(GameScreen.ActionSubmission.CARD);
+        assertThat(chosenTargets()).containsExactly("opponent");
+    }
+
+    @Test
+    void missingActionOffersDoNotCountAsAnEmptyHand() {
+        actionBoard("");
+        page.getByLabel("Hand").evaluate("element => element.remove()");
+        assertThat(screen.submitFirstAvailableAction(false)).isEqualTo(GameScreen.ActionSubmission.NONE);
+        assertThat(screen.hasSubmittedAction()).isFalse();
+    }
+
+    @Test
+    void disabledActionOptionsCanPass() {
+        actionBoard("");
+        page.getByLabel("Hand").locator("button").evaluate("element => element.disabled=true");
+        assertThat(screen.submitFirstAvailableAction(false)).isEqualTo(GameScreen.ActionSubmission.PASS);
+    }
+
+    @Test
+    void incompleteResolutionTargetsRetryWithoutPassingThenSubmitWhenReady() {
+        page.setContent("""
+                <section aria-label="Paradox resolution">
+                  <ul aria-label="Eligible resolution cards"><li><button>Stabilize</button></li></ul>
+                  <fieldset aria-label="Affected events"><ul aria-label="First outcomes"></ul></fieldset>
+                  <button id="confirm" disabled onclick="this.parentElement.innerHTML='Resolution accepted'">
+                    Confirm resolution choice
+                  </button>
+                  <button onclick="document.getElementById('confirm').disabled=false">Pass</button>
+                </section>
+                """);
+        screen.submitFirstEligibleParadoxChoice();
+        assertThat(page.locator("#confirm").isEnabled()).isFalse();
+        page.getByLabel("First outcomes").evaluate("""
+                element => element.innerHTML = `<li><button onclick="
+                  document.getElementById('confirm').disabled=false">Chosen outcome</button></li>`
+                """);
+        screen.submitFirstEligibleParadoxChoice();
+        assertThat(page.getByLabel("Paradox resolution").innerText()).contains("Resolution accepted");
+    }
+
+    @Test
+    void missingResolutionOfferDoesNotPass() {
+        page.setContent("""
+                <section aria-label="Paradox resolution">
+                  <button id="confirm" disabled>Confirm resolution choice</button>
+                  <button onclick="document.getElementById('confirm').disabled=false">Pass</button>
+                </section>
+                """);
+        screen.submitFirstEligibleParadoxChoice();
+        assertThat(page.locator("#confirm").isEnabled()).isFalse();
+    }
+
+    @Test
     void emptyResolutionOfferCanStillPass() {
         page.setContent("""
                 <section aria-label="Paradox resolution">
