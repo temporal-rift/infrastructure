@@ -142,6 +142,11 @@ here instead of its local file is a separate, per-service migration.
    this Config Server exists to avoid. Add a genuinely new block to `config-server/config-repo/application.yml`
    only when the new service needs values no existing namespace already serves.
 
+Normal decision limits allow time to read and plan: 300 seconds for hand selection, 180 seconds for every action
+round, and 120 seconds for declarations and paradox reactions. The action and declaration settings remain keyed
+by player count, with the same normal limits for three, four and five players. Phases advance when decisions finish;
+their timers remain inactivity limits. E2E service profiles explicitly override these values with shorter limits.
+
 ## Centralized logs with VictoriaLogs
 
 The three application containers emit Spring Boot's native Logstash JSON to stdout. Docker forwards each line through
