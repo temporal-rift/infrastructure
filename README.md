@@ -427,7 +427,7 @@ Covered flows:
 |---|---|
 | Full lifecycle | Three isolated browser contexts sign in, create/join/start a game, keep five of seven offered cards, submit action rounds and any triggered paradox resolution, and reach authoritative terminal results through the rendered board. Targets include event lists, paired outcomes, player lists, and a Decoy disguise. |
 | Every faction's normal path | A five-player game (one seat per faction) exercises a server-accepted card action and an available faction special per owner. The Activist's accepted declaration before Round 1 counts as its special action. |
-| Private-view isolation | Every context's captured network traffic is searched for every other player's own dealt hand, allowing earned Intercept intel. Public roster, outcome, round-summary, progress, and chain payloads are checked for forbidden private detail throughout the captured session. |
+| Private-view isolation | Every context's captured network traffic is searched for every other player's own dealt hand, allowing earned Intercept intel. Each private intel entry must match the recipient's own accepted information-card action, game, era, round, and target; independently earned identical intel is allowed. Public roster, outcome, round-summary, progress, and chain payloads are checked for forbidden private detail throughout the captured session. |
 | Explicit passes | A player passes through the rendered action controls, reloads, and sees the accepted decision without spending a card or submitting twice. An empty paradox-resolution offer can also pass. |
 | Reload and round-timeout recovery | An accepted decision survives reload both with and without its HTTP acknowledgement; request counts catch duplicate submissions. A player who never responds still advances on the accelerated timeout. |
 | CI timing provenance | The deployment's effective manifest is asserted to record this suite's accelerated timing as `test-override`, never as the normal-play ruleset. |
@@ -481,8 +481,9 @@ Like the other end-to-end suites, it runs when an epic closes (`epic-e2e.yml`) o
 
 ### Focused harness checks
 
-`mvn test` verifies polling thread ownership and rejects private fields in public payload fixtures without Docker
-or a browser. Page-object checks run in Chromium against deterministic control fixtures, independently of the full
+`mvn test` verifies polling thread ownership, rejects private fields in public payload fixtures, and checks private
+intel entitlement and expiration without Docker or a browser. Page-object checks run in Chromium against deterministic
+control fixtures, including delayed targets that must retry without passing, independently of the full
 deployment's random deals. Install the pinned browser once, then run only those checks:
 
 ```bash

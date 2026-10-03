@@ -2,6 +2,7 @@ package io.github.temporalrift.systemtest.browser;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -32,6 +33,40 @@ final class IsolationCheck {
     private static final Pattern CARD_INSTANCE_ID =
             Pattern.compile("\"cardInstanceId\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
     private static final ObjectMapper JSON = new ObjectMapper();
+    private static final Pattern ACTION_PATH =
+            Pattern.compile(".*/games/([^/]+)/eras/([0-9]+)/rounds/([0-9]+)/actions");
+
+    private record IntelGrant(String gameId, int era, int round, JsonNode card, JsonNode targets) {
+        boolean permits(JsonNode state, JsonNode intel) {
+            if (!gameId.equals(state.path("gameId").asText())
+                    || era != state.path("eraNumber").asInt()) {
+                return false;
+            }
+            var observedRound = intel.path("observedInRound").asInt();
+            var eventId = intel.path("eventId").asText();
+            return switch (intel.path("kind").asText()) {
+                case "PROBABILITY" ->
+                    "SCAN".equals(card.path("cardType").asText())
+                            && observedRound >= round
+                            && targets.path("targetEventIds")
+                                    .valueStream()
+                                    .anyMatch(target -> eventId.equals(target.asText()));
+                case "INFLUENCE" ->
+                    "TRACE".equals(card.path("cardType").asText())
+                            && observedRound == round
+                            && ("II".equals(card.path("grade").asText())
+                                    || eventId.equals(
+                                            targets.path("targetEventId").asText()));
+                case "HAND_CARD" ->
+                    "INTERCEPT".equals(card.path("cardType").asText())
+                            && observedRound == round
+                            && targets.path("targetPlayerId")
+                                    .asText()
+                                    .equals(intel.path("targetPlayerId").asText());
+                default -> false;
+            };
+        }
+    }
 
     private IsolationCheck() {}
 
@@ -102,17 +137,79 @@ final class IsolationCheck {
 
     static void assertPublicViewsStayFiltered(List<BrowserPlayer> players) {
         for (var player : players) {
-            var states = player.network().capturedExchanges().stream()
-                    .filter(exchange -> exchange.url().endsWith("/state") && exchange.status() == 200)
-                    .map(exchange -> JSON.readTree(exchange.responseBody()))
-                    .toList();
+            var exchanges = player.network().capturedExchanges();
+            var states = participantStates(exchanges);
             assertThat(states)
                     .as("%s receives participant state", player.name())
                     .isNotEmpty();
             for (var state : states) {
                 assertPublicStateIsFiltered(state);
             }
+            assertEarnedIntelIsScoped(player.name(), exchanges);
         }
+    }
+
+    /** Uses the recipient's accepted requests, so independently earned identical intel is allowed. */
+    static void assertEarnedIntelIsScoped(String playerName, List<NetworkPayloadRecorder.Exchange> exchanges) {
+        var states = participantStates(exchanges);
+        Map<String, JsonNode> ownCards = new LinkedHashMap<>();
+        for (var state : states) {
+            for (var cards : List.of(
+                    state.path("myHand"), state.path("pendingHandSelection").path("cards"))) {
+                for (var card : cards) {
+                    ownCards.put(card.path("cardInstanceId").asText(), card);
+                }
+            }
+        }
+        var grants = new ArrayList<IntelGrant>();
+        // Collect the whole capture first: POST acknowledgements and projected state can arrive
+        // in either order, and spent cards are absent from later hands.
+        for (var exchange : exchanges) {
+            var path = ACTION_PATH.matcher(exchange.url());
+            if (!path.matches()
+                    || exchange.status() < 200
+                    || exchange.status() >= 300
+                    || exchange.requestBody() == null) {
+                continue;
+            }
+            var request = JSON.readTree(exchange.requestBody());
+            var card = ownCards.get(request.path("cardInstanceId").asText());
+            if ("CARD".equals(request.path("actionType").asText()) && card != null) {
+                grants.add(new IntelGrant(
+                        path.group(1),
+                        Integer.parseInt(path.group(2)),
+                        Integer.parseInt(path.group(3)),
+                        card,
+                        request));
+            }
+        }
+        for (var state : states) {
+            var intel = state.path("myRevealedIntel");
+            assertThat(intel.isArray())
+                    .as("%s receives a private intel array", playerName)
+                    .isTrue();
+            if (Set.of("ERA_END", "GAME_ENDED").contains(state.path("phase").asText())) {
+                assertThat(intel.isEmpty())
+                        .as("%s's intel expires at era end", playerName)
+                        .isTrue();
+            }
+            for (var entry : intel) {
+                assertThat(grants.stream().anyMatch(grant -> grant.permits(state, entry)))
+                        .as(
+                                "%s's %s intel in era %s requires its own accepted information card and target",
+                                playerName,
+                                entry.path("kind").asText(),
+                                state.path("eraNumber").asInt())
+                        .isTrue();
+            }
+        }
+    }
+
+    private static List<JsonNode> participantStates(List<NetworkPayloadRecorder.Exchange> exchanges) {
+        return exchanges.stream()
+                .filter(exchange -> exchange.url().endsWith("/state") && exchange.status() == 200)
+                .map(exchange -> JSON.readTree(exchange.responseBody()))
+                .toList();
     }
 
     static void assertPublicStateIsFiltered(JsonNode state) {
