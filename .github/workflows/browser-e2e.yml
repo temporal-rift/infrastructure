@@ -58,9 +58,9 @@ jobs:
   browser-e2e:
     name: browser-e2e
     runs-on: ubuntu-latest
-    # Cold-cache image builds plus stack start-up (~8 min) and the four games run concurrently
-    # (~6-8 min).
-    timeout-minutes: 25
+    # Cold-cache image builds plus stack start-up (~8 min), then five deployed games on four
+    # workers. Each game has a 12-minute bound; allow for the final queued scenario as well.
+    timeout-minutes: 40
 
     steps:
       - name: Validate service/ref inputs

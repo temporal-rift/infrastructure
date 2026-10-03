@@ -117,7 +117,10 @@ final class BrowserPlayer implements AutoCloseable {
         // whether the enclosing JUnit test failed, and always exporting a small trace zip is cheap.
         // capture-browser-e2e-diagnostics.sh bundles this directory; the CI workflow uploads that
         // bundle as a build artifact only when the job itself failed.
-        context.tracing().stop(new Tracing.StopOptions().setPath(traceFile));
-        context.close();
+        try {
+            context.tracing().stop(new Tracing.StopOptions().setPath(traceFile));
+        } finally {
+            context.close();
+        }
     }
 }

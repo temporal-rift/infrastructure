@@ -54,6 +54,8 @@ final class BrowserGameScenario implements AutoCloseable {
 
     static void waitUntil(BooleanSupplier condition, String description, Duration timeout) {
         await().atMost(timeout)
+                // Playwright objects and callbacks stay on the thread that created the browser.
+                .pollInSameThread()
                 .pollInterval(Duration.ofMillis(500))
                 .alias(description)
                 .until(condition::getAsBoolean);
@@ -76,8 +78,9 @@ final class BrowserGameScenario implements AutoCloseable {
 
     @Override
     public void close() {
-        players.forEach(BrowserPlayer::close);
-        browser.close();
-        playwright.close();
+        try (playwright;
+                browser) {
+            players.forEach(BrowserPlayer::close);
+        }
     }
 }

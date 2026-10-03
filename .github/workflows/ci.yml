@@ -1,8 +1,8 @@
 name: CI
 
 # Compile check and SonarCloud analysis for the temporal-rift-system-tests module (this repository's root pom): no
-# Docker, no profile, just `mvn verify`. The module's only tests are Failsafe *IT classes gated behind the end-to-end
-# profiles, which run when an epic closes (epic-e2e.yml). `sonar.coverage.exclusions=**/*` (pom.xml) keeps this
+# Docker, no profile, just `mvn verify`. Harness unit tests run here; browser and system Failsafe *IT classes are
+# gated behind the end-to-end profiles, which run when an epic closes (epic-e2e.yml). `sonar.coverage.exclusions=**/*` keeps this
 # black-box harness out of the coverage metric, so the scan here reports code smells, bugs, and security findings.
 
 on:
