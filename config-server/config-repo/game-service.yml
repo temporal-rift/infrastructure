@@ -24,10 +24,14 @@ game:
     win-score-threshold: 20
     reconnect-grace-period-seconds: 30
     action-round-timer-seconds:
-      3: 60
-      4: 45
-      5: 30
-    hand-selection-timer-seconds: 120
+      3: 180
+      4: 180
+      5: 180
+    hand-selection-timer-seconds: 300
+    declaration-timer-seconds:
+      3: 120
+      4: 120
+      5: 120
     card-category-weights:
       PROBABILITY_SHIFTER: 35
       INFORMATION: 25
