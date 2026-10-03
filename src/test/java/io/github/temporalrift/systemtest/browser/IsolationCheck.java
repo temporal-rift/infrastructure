@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -99,42 +100,51 @@ final class IsolationCheck {
         return body;
     }
 
-    /**
-     * Second, DOM-level isolation signal covering earned intel (future intelligence): each entry a
-     * player's own "Your earned knowledge" panel renders (Scan/Trace/Intercept text, distinctive
-     * enough — event titles, exact percentages, revealed player names — that unlike hand cards a
-     * plain text match is not collision-prone) must never appear in another context's traffic.
-     * Faction identity and unresolved-opponent-decision coverage are not implemented: game-client's
-     * live (non-fixture) view has no real faction display to read from at all, and the exact wire
-     * shape a normal-player payload would leak an unresolved decision through is not something this
-     * suite can verify without a live stack to inspect — left as a known, documented gap rather than
-     * a guessed-at check.
-     */
-    static void assertEarnedKnowledgeStaysPrivate(List<BrowserPlayer> players) {
-        Map<String, List<String>> ownKnowledgeByPlayer = new LinkedHashMap<>();
+    static void assertPublicViewsStayFiltered(List<BrowserPlayer> players) {
         for (var player : players) {
-            ownKnowledgeByPlayer.put(player.name(), player.screen().earnedKnowledgeEntries());
-        }
-
-        for (var owner : players) {
-            for (var entry : ownKnowledgeByPlayer.get(owner.name())) {
-                for (var other : players) {
-                    if (other == owner) {
-                        continue;
-                    }
-                    for (var exchange : other.network().capturedExchanges()) {
-                        var body = exchange.responseBody();
-                        if (body == null) {
-                            continue;
-                        }
-                        assertThat(body)
-                                .as(
-                                        "%s's network traffic (%s) must never contain %s's earned knowledge '%s'",
-                                        other.name(), exchange.url(), owner.name(), entry)
-                                .doesNotContain(entry);
-                    }
-                }
+            var states = player.network().capturedExchanges().stream()
+                    .filter(exchange -> exchange.url().endsWith("/state") && exchange.status() == 200)
+                    .map(exchange -> JSON.readTree(exchange.responseBody()))
+                    .toList();
+            assertThat(states)
+                    .as("%s receives participant state", player.name())
+                    .isNotEmpty();
+            for (var state : states) {
+                assertPublicStateIsFiltered(state);
             }
         }
+    }
+
+    static void assertPublicStateIsFiltered(JsonNode state) {
+        for (var player : state.path("players")) {
+            assertOnlyFields(player, "playerId", "playerName", "score", "isConnected", "faction");
+            if (!"GAME_ENDED".equals(state.path("phase").asText())) {
+                assertThat(player.path("faction").isMissingNode()
+                                || player.path("faction").isNull())
+                        .as("factions remain hidden before the terminal reveal")
+                        .isTrue();
+            }
+        }
+        for (var event : state.path("activeEvents")) {
+            for (var outcome : event.path("outcomes")) {
+                assertOnlyFields(outcome, "outcomeId", "description", "initialProbability");
+            }
+        }
+        for (var summary : state.path("lastRoundSummary").path("actionSummaries")) {
+            assertOnlyFields(summary, "playerId", "actionCategory", "actionFamily", "skipped");
+        }
+        for (var progress : List.of("actionRoundProgress", "paradoxResolutionProgress")) {
+            var value = state.path("phaseContext").path(progress);
+            if (value.isObject()) {
+                assertOnlyFields(value, "submittedCount", "totalPlayers", "pendingPlayerIds");
+            }
+        }
+        if (state.path("chain").isObject()) {
+            assertOnlyFields(state.path("chain"), "status", "length");
+        }
+    }
+
+    private static void assertOnlyFields(JsonNode value, String... allowed) {
+        assertThat(value.propertyNames()).isSubsetOf(allowed);
     }
 }

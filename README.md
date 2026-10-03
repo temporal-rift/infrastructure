@@ -425,15 +425,20 @@ Covered flows:
 
 | Flow | What is proven |
 |---|---|
-| Full lifecycle | Three isolated browser contexts sign in, create/join/start a game, keep five of seven offered cards, submit all three action rounds (including any triggered paradox resolution), and reach authoritative terminal results — entirely through the rendered client. |
-| Every faction's normal path | A five-player game (one seat per faction) exercises at least one ordinary action, and a faction special when the game makes one available, for every faction. |
-| Private-view isolation | Every context's captured network traffic is searched for every other player's own dealt hand; none may ever appear in a context that does not own it. |
-| Reload and round-timeout recovery | A player's accepted round decision survives a page reload without a duplicate submission; a round a player never responds to still closes on its accelerated timeout without deadlocking the game. |
+| Full lifecycle | Three isolated browser contexts sign in, create/join/start a game, keep five of seven offered cards, submit action rounds and any triggered paradox resolution, and reach authoritative terminal results through the rendered board. Targets include event lists, paired outcomes, player lists, and a Decoy disguise. |
+| Every faction's normal path | A five-player game (one seat per faction) exercises a server-accepted card action and an available faction special per owner. The Activist's accepted declaration before Round 1 counts as its special action. |
+| Private-view isolation | Every context's captured network traffic is searched for every other player's own dealt hand, allowing earned Intercept intel. Public roster, outcome, round-summary, progress, and chain payloads are checked for forbidden private detail throughout the captured session. |
+| Explicit passes | A player passes through the rendered action controls, reloads, and sees the accepted decision without spending a card or submitting twice. An empty paradox-resolution offer can also pass. |
+| Reload and round-timeout recovery | An accepted decision survives reload both with and without its HTTP acknowledgement; request counts catch duplicate submissions. A player who never responds still advances on the accelerated timeout. |
 | CI timing provenance | The deployment's effective manifest is asserted to record this suite's accelerated timing as `test-override`, never as the normal-play ruleset. |
 
-Explicitly excluded: human-paced (production-timing) verification, which remains a manually facilitated playtest
-activity, not something this suite's accelerated timing can stand in for; and the same flows this repository's
-system-e2e harness already documents as lacking a complete production path.
+The test override sets hand selection, declaration, and paradox resolution to 15 seconds, and action rounds to
+30 seconds. Each game's 12-minute bound allows all five eras to advance on those timers. Parallel scenarios retain
+separate browser instances, while all calls and callbacks within one scenario stay on its Playwright owner thread.
+
+Explicitly excluded: human-paced production timing, forced coverage of every random card or rare ending, and
+WebSocket delivery/disconnect recovery. Authenticated polling supplies these browser journeys' state recovery.
+Randomly triggered paradox phases are driven through the board; the suite does not claim they trigger in every game.
 
 ### Prerequisites
 
@@ -473,3 +478,18 @@ Like the other end-to-end suites, it runs when an epic closes (`epic-e2e.yml`) o
 (`auth.e2e.test`), plus a Java truststore the three backend services trust it through — see
 `docker-compose.e2e.yml`'s comments for the full init-service layout (`cert-init`, `kafka-topics`,
 `identity-provider-ready`, `playtest-manifest-init`) and why each is kept single-purpose rather than combined.
+
+### Focused harness checks
+
+`mvn test` verifies polling thread ownership and rejects private fields in public payload fixtures without Docker
+or a browser. Page-object checks run in Chromium against deterministic control fixtures, independently of the full
+deployment's random deals. Install the pinned browser once, then run only those checks:
+
+```bash
+mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.classpathScope=test -Dexec.args="install chromium"
+mvn verify -Pbrowser-e2e -Dit.test=GameScreenIT
+```
+
+These checks cover list targets, paired outcomes, disguises, declarations, and passes. They validate harness
+behavior; the deployed `BrowserGameplayIT` scenarios provide the separate proof that those journeys work through
+the actual client and services. Keep `pom.xml`'s Playwright version equal to the pinned runner image version.

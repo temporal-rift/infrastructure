@@ -1,6 +1,5 @@
 package io.github.temporalrift.systemtest.browser;
 
-import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -9,24 +8,14 @@ import com.microsoft.playwright.Page;
 import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.AriaRole;
 
-/**
- * Page object over {@code game-client}'s player pages: the lobby ({@code /lobby},
- * {@code /lobbies/{lobbyId}}) and the game ({@code /games/{gameId}}). Within each page every panel
- * (lobby, action round, paradox resolution, knowledge, results) is a labeled {@code <section>} that
- * appears or disappears in place, so this class exposes one accessor per section; a scenario only
- * ever needs the sections of the page its player is on, and the client moves players from the lobby
- * to the game page itself when the host starts. Every locator here targets the accessible
- * role/label/text the real component tree already exposes (confirmed by reading
- * {@code SignInPanel}, {@code LobbyPanel}, {@code ActionPanel}, {@code ParadoxResolutionPanel},
- * {@code ResultsPanel} on {@code game-client}'s main branch) — no {@code data-testid} hooks exist
- * or are needed.
- */
+/** Drives the deployed client's accessible controls; target legality remains server-owned. */
 final class GameScreen {
 
     enum ActionSubmission {
         NONE,
         CARD,
-        SPECIAL
+        SPECIAL,
+        PASS
     }
 
     // Short and explicit: these probe reads run inside polling predicates (see
@@ -187,6 +176,9 @@ final class GameScreen {
      * @return the option submitted, or {@code NONE} if no complete option is rendered yet
      */
     ActionSubmission submitFirstAvailableAction(boolean preferSpecial) {
+        if (!hasOpenActionRound() || hasSubmittedAction()) {
+            return ActionSubmission.NONE;
+        }
         var section = actionSection();
         var cards = section.getByLabel("Hand").locator("button");
         var specials = section.getByLabel("Faction specials").locator("button");
@@ -196,9 +188,25 @@ final class GameScreen {
         if (first != ActionSubmission.NONE) {
             return first;
         }
-        return preferSpecial
+        var fallback = preferSpecial
                 ? submitFirstCompletableOption(section, cards, ActionSubmission.CARD)
                 : submitFirstCompletableOption(section, specials, ActionSubmission.SPECIAL);
+        return fallback != ActionSubmission.NONE ? fallback : submitPass();
+    }
+
+    ActionSubmission submitPass() {
+        if (!hasOpenActionRound()) {
+            return ActionSubmission.NONE;
+        }
+        var section = actionSection();
+        var pass = section.getByRole(
+                AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Pass").setExact(true));
+        var confirm = section.getByRole(
+                AriaRole.BUTTON,
+                new Locator.GetByRoleOptions().setName("Confirm action").setExact(true));
+        return safeClick(pass) && safeIsEnabled(confirm) && safeClick(confirm)
+                ? ActionSubmission.PASS
+                : ActionSubmission.NONE;
     }
 
     private ActionSubmission submitFirstCompletableOption(
@@ -230,6 +238,11 @@ final class GameScreen {
     /** Picks the first valid target, if the chosen card or special needs one. Returns false when a
      * control disappeared mid-selection (the round closed), so the caller abandons this attempt. */
     private boolean resolveTargetIfPresent(Locator section) {
+        var disguise = section.getByLabel("Choose a disguise");
+        if (disguise.count() > 0) {
+            var category = firstEnabled(disguise.getByRole(AriaRole.BUTTON));
+            return category != null && safeClick(category);
+        }
         var targetPicker = section.getByLabel("Choose a target");
         if (targetPicker.count() == 0) {
             return true;
@@ -239,16 +252,18 @@ final class GameScreen {
             if (!safeClick(eventButtons.first())) {
                 return false;
             }
-            var sourceOutcome = firstEnabled(targetPicker.locator("ul[aria-label$='source outcomes'] button"));
+            // Pair outcomes must stay on the event whose source was selected.
+            var event = eventButtons.first().locator("..");
+            var sourceOutcome = firstEnabled(event.locator("ul[aria-label$='source outcomes'] button"));
             if (sourceOutcome != null) {
                 if (!safeClick(sourceOutcome)) {
                     return false;
                 }
-                var targetOutcomes = targetPicker.locator("ul[aria-label$='target outcomes'] button");
+                var targetOutcomes = event.locator("ul[aria-label$='target outcomes'] button");
                 var targetOutcome = firstEnabled(targetOutcomes);
                 return targetOutcome == null || safeClick(targetOutcome);
             }
-            var outcomeButton = firstEnabled(targetPicker.locator("ul[aria-label$='outcomes'] button"));
+            var outcomeButton = firstEnabled(event.locator("ul[aria-label$='outcomes'] button"));
             if (outcomeButton != null) {
                 return safeClick(outcomeButton);
             }
@@ -260,8 +275,15 @@ final class GameScreen {
             }
             return true;
         }
-        var playerButton = firstEnabled(targetPicker.getByLabel("Players").locator("button"));
-        return playerButton == null || safeClick(playerButton);
+        var playerButtons = targetPicker.getByLabel("Players").getByRole(AriaRole.BUTTON);
+        var confirm = section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm action"));
+        for (int i = 0; i < playerButtons.count() && !safeIsEnabled(confirm); i++) {
+            var playerButton = playerButtons.nth(i);
+            if (safeIsEnabled(playerButton) && !safeClick(playerButton)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private Locator firstEnabled(Locator candidates) {
@@ -283,31 +305,55 @@ final class GameScreen {
 
     boolean hasOpenParadoxChoice() {
         return paradoxSection()
-                                .getByRole(
-                                        AriaRole.BUTTON,
-                                        new Locator.GetByRoleOptions().setName("Confirm resolution choice"))
-                                .count()
-                        > 0
-                && paradoxSection()
-                                .getByLabel("Eligible resolution cards")
-                                .locator("button")
-                                .count()
-                        > 0;
+                        .getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"))
+                        .count()
+                > 0;
     }
 
     void submitFirstEligibleParadoxChoice() {
         var section = paradoxSection();
-        if (!safeClick(section.getByLabel("Eligible resolution cards")
-                .locator("button")
-                .first())) {
+        var confirm =
+                section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"));
+        var card = firstEnabled(section.getByLabel("Eligible resolution cards").getByRole(AriaRole.BUTTON));
+        if (card != null) {
+            if (!safeClick(card)) {
+                return;
+            }
+            var outcome =
+                    firstEnabled(section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button"));
+            if (outcome != null && safeClick(outcome) && safeIsEnabled(confirm)) {
+                safeClick(confirm);
+                return;
+            }
+        }
+        if (safeClick(section.getByRole(
+                        AriaRole.BUTTON,
+                        new Locator.GetByRoleOptions().setName("Pass").setExact(true)))
+                && safeIsEnabled(confirm)) {
+            safeClick(confirm);
+        }
+    }
+
+    // --- Declaration window ----------------------------------------------
+
+    boolean hasOpenDeclaration() {
+        return page.getByLabel("Declaration window")
+                        .getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm declaration"))
+                        .count()
+                > 0;
+    }
+
+    void submitFirstAvailableDeclaration() {
+        var section = page.getByLabel("Declaration window");
+        var mode = firstEnabled(section.getByLabel("Eligible declaration modes").getByRole(AriaRole.BUTTON));
+        if (mode == null || !safeClick(mode)) {
             return;
         }
-        var outcome = firstEnabled(section.getByLabel("Affected events").locator("ul[aria-label$='outcomes'] button"));
+        var outcome = firstEnabled(section.getByLabel("Declaration targets").getByRole(AriaRole.BUTTON));
         if (outcome == null || !safeClick(outcome)) {
             return;
         }
-        var confirm =
-                section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm resolution choice"));
+        var confirm = section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm declaration"));
         if (safeIsEnabled(confirm)) {
             safeClick(confirm);
         }
@@ -346,13 +392,9 @@ final class GameScreen {
         return resultsSection().getByLabel("Final scores").locator("li").count();
     }
 
-    // --- Knowledge (earned intel) ------------------------------------------
-
-    /** This player's own earned intel (Scan/Trace/Intercept), rendered only to its owner — used
-     * alongside the network-payload check as a second, DOM-level isolation signal for future
-     * intelligence, distinct from the hand-card identity check. */
-    List<String> earnedKnowledgeEntries() {
-        var list = page.getByLabel("Your earned knowledge");
-        return list.count() > 0 ? list.locator("li").allInnerTexts() : List.of();
+    int handCardCount() {
+        return page.getByLabel("Hand", new Page.GetByLabelOptions().setExact(true))
+                .locator("li")
+                .count();
     }
 }

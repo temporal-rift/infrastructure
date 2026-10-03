@@ -10,8 +10,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -27,7 +25,7 @@ import org.junit.jupiter.api.TestInfo;
  * normal path represented, and safe recovery from reload/timeout — complementing
  * {@code TemporalRiftSystemIT}'s command-only cross-service proof with genuine browser interaction.
  * Runs only under the {@code browser-e2e} Maven profile, against the isolated deployment its
- * lifecycle brings up (see pom.xml and {@code compose.browser-e2e.yml}).
+ * Compose brings up (see {@code docker-compose.e2e.yml}).
  */
 class BrowserGameplayIT {
 
@@ -69,7 +67,7 @@ class BrowserGameplayIT {
                 .as("every player submits an ordinary card action through the browser")
                 .containsAll(players.stream().map(BrowserPlayer::name).toList());
         IsolationCheck.assertHandsStayPrivate(players);
-        IsolationCheck.assertEarnedKnowledgeStaysPrivate(players);
+        IsolationCheck.assertPublicViewsStayFiltered(players);
         assertTimingIsRecordedAsATestOverride();
     }
 
@@ -102,8 +100,43 @@ class BrowserGameplayIT {
                 .as("every faction owner with an available special submits it")
                 .containsAll(coverage.specialAvailableActors())
                 .isNotEmpty();
+        var activist = players.stream()
+                .filter(player -> "ACTIVISTS".equals(player.screen().currentFaction()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(activist.network().hasAcceptedDeclaration())
+                .as("the Activist submits a server-accepted declaration before Round 1")
+                .isTrue();
         IsolationCheck.assertHandsStayPrivate(players);
-        IsolationCheck.assertEarnedKnowledgeStaysPrivate(players);
+        IsolationCheck.assertPublicViewsStayFiltered(players);
+    }
+
+    @Test
+    void explicitPassSurvivesReloadWithoutSpendingACard() {
+        scenario = new BrowserGameScenario();
+        var players = signInAndStartLobby("Host", "Second", "Third");
+        awaitFirstActionRound(players);
+        var host = players.get(0);
+        var handSize = host.screen().handCardCount();
+        assertThat(handSize).isEqualTo(5);
+
+        assertThat(host.screen().submitPass()).isEqualTo(GameScreen.ActionSubmission.PASS);
+        BrowserGameScenario.waitUntil(host.screen()::hasSubmittedAction, "the host's explicit pass is accepted");
+        assertThat(host.network().acceptedActionTypes()).containsExactly("PASS");
+        host.reload();
+        BrowserGameScenario.waitUntil(
+                () -> host.screen().hasSubmittedAction() && !host.screen().hasOpenActionRound(),
+                "the accepted pass survives reload without opening another decision");
+        assertThat(host.screen().handCardCount()).isEqualTo(handSize);
+        assertThat(host.screen().submitPass()).isEqualTo(GameScreen.ActionSubmission.NONE);
+        assertThat(host.network().acceptedActionCount()).isEqualTo(1);
+
+        driveGameToResults(players, false);
+        for (var player : players) {
+            assertThat(player.screen().finalScoreCount()).isEqualTo(players.size());
+        }
+        IsolationCheck.assertHandsStayPrivate(players);
+        IsolationCheck.assertPublicViewsStayFiltered(players);
     }
 
     @Test
@@ -113,15 +146,7 @@ class BrowserGameplayIT {
         var host = players.get(0);
         var slowPlayer = players.get(2);
 
-        BrowserGameScenario.waitUntil(
-                () -> players.stream()
-                        .allMatch(p ->
-                                p.screen().isHandKeepOffered() || p.screen().hasOpenActionRound()),
-                "round 1 is reachable for every player");
-        keepHandIfOffered(players);
-        BrowserGameScenario.waitUntil(
-                () -> players.stream().allMatch(p -> p.screen().hasOpenActionRound()),
-                "round 1's action step is open for every player");
+        awaitFirstActionRound(players);
 
         // Host submits, then reloads: the accepted decision must survive the reload without
         // allowing (or needing) a second submission.
@@ -135,6 +160,8 @@ class BrowserGameplayIT {
         assertThat(host.screen().currentPath())
                 .as("the reload keeps the host on the same game's page")
                 .isEqualTo(gamePath);
+        assertThat(host.screen().submitFirstAvailableAction(false)).isEqualTo(GameScreen.ActionSubmission.NONE);
+        assertThat(host.network().acceptedActionCount()).isEqualTo(1);
 
         // The second player submits normally; the third deliberately never submits this round, so
         // the round must close on its own accelerated (test-override) timeout, not deadlock.
@@ -156,21 +183,13 @@ class BrowserGameplayIT {
     }
 
     @Test
-    void lostActionResponseStillRecoversWithoutDuplicateSpendOrDeadlock() throws Exception {
+    void lostActionResponseStillRecoversWithoutDuplicateSpendOrDeadlock() {
         scenario = new BrowserGameScenario();
         var players = signInAndStartLobby("Host", "Second", "Third");
         var host = players.get(0);
         var slowPlayer = players.get(2);
 
-        BrowserGameScenario.waitUntil(
-                () -> players.stream()
-                        .allMatch(p ->
-                                p.screen().isHandKeepOffered() || p.screen().hasOpenActionRound()),
-                "round 1 is reachable for every player");
-        keepHandIfOffered(players);
-        BrowserGameScenario.waitUntil(
-                () -> players.stream().allMatch(p -> p.screen().hasOpenActionRound()),
-                "round 1's action step is open for every player");
+        awaitFirstActionRound(players);
 
         // Drop the acknowledgement after the service has accepted it: fetch forwards the real
         // request (so the service records the action), then abort hides the response from the
@@ -178,9 +197,15 @@ class BrowserGameplayIT {
         var dropArmed = new AtomicBoolean(true);
         var serviceAccepted = new AtomicBoolean(false);
         var serviceStatus = new AtomicInteger(-1);
-        var accepted = new CountDownLatch(1);
+        var actionRequests = new AtomicInteger();
+        var responseDropped = new AtomicBoolean(false);
         host.page().route("**/eras/*/rounds/*/actions", route -> {
-            if (!"POST".equalsIgnoreCase(route.request().method()) || !dropArmed.getAndSet(false)) {
+            if (!"POST".equalsIgnoreCase(route.request().method())) {
+                route.resume();
+                return;
+            }
+            actionRequests.incrementAndGet();
+            if (!dropArmed.getAndSet(false)) {
                 route.resume();
                 return;
             }
@@ -194,21 +219,23 @@ class BrowserGameplayIT {
                 // The fetch itself failed, so nothing was accepted; the abort below still
                 // surfaces a network failure to the browser instead of hanging the submit.
             } finally {
-                accepted.countDown();
+                route.abort();
+                responseDropped.set(true);
             }
-            route.abort();
         });
 
         host.screen().submitFirstAvailableAction(false);
-        assertThat(accepted.await(90, TimeUnit.SECONDS))
-                .as("the service receives the action before reload")
-                .isTrue();
+        BrowserGameScenario.waitUntil(
+                () -> {
+                    host.screen().currentPath();
+                    return responseDropped.get();
+                },
+                "the browser pumps the intercepted request until its acknowledgement is dropped");
         assertThat(serviceAccepted)
                 .as("the dropped acknowledgement belongs to a service-accepted action (status %s)", serviceStatus.get())
                 .isTrue();
         // Intentionally no wait for hasSubmittedAction: the acknowledgement was withheld, so the
         // browser must recover the accepted decision from authoritative state after reload.
-        host.page().unroute("**/eras/*/rounds/*/actions");
         var gamePath = host.screen().currentPath();
         host.reload();
         BrowserGameScenario.waitUntil(
@@ -220,6 +247,10 @@ class BrowserGameplayIT {
         assertThat(host.screen().submitFirstAvailableAction(false))
                 .as("the accepted action cannot be submitted or spent a second time")
                 .isEqualTo(GameScreen.ActionSubmission.NONE);
+        assertThat(actionRequests)
+                .as("reload sends no duplicate action request")
+                .hasValue(1);
+        host.page().unroute("**/eras/*/rounds/*/actions");
 
         // The second player submits normally; the third deliberately never submits this round, so
         // the round must close on its own accelerated (test-override) timeout, not deadlock.
@@ -272,12 +303,17 @@ class BrowserGameplayIT {
         return players;
     }
 
-    private void keepHandIfOffered(List<BrowserPlayer> players) {
-        for (var player : players) {
-            if (player.screen().isHandKeepOffered()) {
-                player.screen().keepFirstFiveOfferedCards();
-            }
-        }
+    private void awaitFirstActionRound(List<BrowserPlayer> players) {
+        BrowserGameScenario.waitUntil(
+                () -> {
+                    for (var player : players) {
+                        if (player.screen().isHandKeepOffered()) {
+                            player.screen().keepFirstFiveOfferedCards();
+                        }
+                    }
+                    return players.stream().allMatch(player -> player.screen().hasOpenActionRound());
+                },
+                "Round 1 opens for every player after hand selection and the declaration window");
     }
 
     /**
@@ -298,23 +334,29 @@ class BrowserGameplayIT {
                     boolean allDone = true;
                     for (var player : players) {
                         var screen = player.screen();
-                        if (screen.hasCompleteResults()) {
+                        var complete = screen.hasCompleteResults();
+                        var acceptedTypes = player.network().acceptedActionTypes();
+                        if (acceptedTypes.contains("CARD")) {
+                            cardActors.add(player.name());
+                        }
+                        if (acceptedTypes.contains("SPECIAL")
+                                || player.network().hasAcceptedDeclaration()) {
+                            specialActors.add(player.name());
+                        }
+                        if (complete) {
                             continue;
                         }
                         allDone = false;
                         if (screen.isHandKeepOffered()) {
                             screen.keepFirstFiveOfferedCards();
+                        } else if (screen.hasOpenDeclaration()) {
+                            specialAvailableActors.add(player.name());
+                            screen.submitFirstAvailableDeclaration();
                         } else if (screen.hasOpenActionRound() && !screen.hasSubmittedAction()) {
                             if (screen.hasAvailableSpecial()) {
                                 specialAvailableActors.add(player.name());
                             }
-                            var submitted = screen.submitFirstAvailableAction(
-                                    preferSpecial && !specialActors.contains(player.name()));
-                            if (submitted == GameScreen.ActionSubmission.CARD) {
-                                cardActors.add(player.name());
-                            } else if (submitted == GameScreen.ActionSubmission.SPECIAL) {
-                                specialActors.add(player.name());
-                            }
+                            screen.submitFirstAvailableAction(preferSpecial && !specialActors.contains(player.name()));
                         } else if (screen.hasOpenParadoxChoice()) {
                             screen.submitFirstEligibleParadoxChoice();
                         } else if (screen.canRefreshResults()) {
@@ -324,7 +366,7 @@ class BrowserGameplayIT {
                     return allDone;
                 },
                 "every player reaches authoritative terminal results",
-                Duration.ofMinutes(8));
+                Duration.ofMinutes(12));
         return new ActionCoverage(cardActors, specialActors, specialAvailableActors);
     }
 

@@ -211,7 +211,8 @@ services:
       # Bounded, explicitly labeled acceleration for this suite only -- real deployments never set
       # this.
       SPRING_APPLICATION_JSON: >-
-        {"game":{"rules":{"action-round-timer-seconds":{"3":15,"4":15,"5":15},
+        {"game":{"rules":{"action-round-timer-seconds":{"3":30,"4":30,"5":30},
+          "declaration-timer-seconds":{"3":15,"4":15,"5":15},
           "hand-selection-timer-seconds":15,
           "paradox-resolution-timer-seconds":15}}}
     volumes:
