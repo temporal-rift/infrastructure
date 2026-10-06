@@ -39,11 +39,13 @@ target "web-client" {
 # Tags must match the `image:` docker-compose.e2e.yml gives these two build-from-source services.
 target "config-server" {
   context = "infrastructure/config-server"
+  secret  = ["id=maven_settings,env=MAVEN_SETTINGS"]
   tags    = ["temporal-rift/browser-e2e-config-server:local"]
 }
 
 target "e2e-tests" {
   context    = "infrastructure"
   dockerfile = "browser-e2e/Dockerfile"
+  secret     = ["id=maven_settings,env=MAVEN_SETTINGS"]
   tags       = ["temporal-rift/browser-e2e-tests:local"]
 }

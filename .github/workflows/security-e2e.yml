@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   group: security-e2e-${{ github.repository }}-${{ github.ref }}
@@ -35,8 +36,16 @@ jobs:
         with:
           java-version: 26
           java-distribution: temurin
-          maven-version: 3.9.13
+          maven-version: 4.0.0-rc-7
           settings-githubServer: false
+          settings-servers: |
+            [
+              {
+                "id": "github",
+                "username": "${{ github.actor }}",
+                "password": "${{ secrets.GITHUB_TOKEN }}"
+              }
+            ]
 
       - name: Cache Maven packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -57,7 +66,7 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      # Failsafe's post-integration-test teardown does not run if the job is cancelled or the JVM
+      # Failsafe's after:integration-test teardown does not run if the job is cancelled or the JVM
       # dies. Scoped to compose.secure.yml's own project name, so it cannot touch system-e2e's
       # temporal-rift-e2e project or a developer's local temporal-rift dev stack.
       - name: Tear down secure system under test

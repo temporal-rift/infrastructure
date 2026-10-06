@@ -155,6 +155,8 @@ services:
     image: temporal-rift/browser-e2e-config-server:local
     build:
       context: ./config-server
+      secrets:
+        - maven_settings
     volumes:
       - ./config-server/config-repo:/config:ro
     healthcheck:
@@ -346,6 +348,8 @@ services:
     build:
       context: .
       dockerfile: browser-e2e/Dockerfile
+      secrets:
+        - maven_settings
     profiles: [test]
     environment:
       # Read via ${env.X} in pom.xml's failsafe systemPropertyVariables -- Compose `environment:`
@@ -374,3 +378,7 @@ services:
 volumes:
   e2e-tls:
   e2e-web-client-dist:
+
+secrets:
+  maven_settings:
+    environment: MAVEN_SETTINGS

@@ -7,7 +7,7 @@
     <parent>
         <groupId>io.github.temporal-rift</groupId>
         <artifactId>temporal-rift-bom</artifactId>
-        <version>1.14.0</version>
+        <version>2.0.0</version>
         <relativePath/>
     </parent>
 
@@ -88,7 +88,7 @@
                         <executions>
                             <execution>
                                 <id>reset-system-under-test</id>
-                                <phase>pre-integration-test</phase>
+                                <phase>before:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -111,7 +111,7 @@
                             </execution>
                             <execution>
                                 <id>start-system-under-test</id>
-                                <phase>pre-integration-test</phase>
+                                <phase>before:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -135,13 +135,13 @@
                                 </configuration>
                             </execution>
                             <execution>
-                                <!-- Must be declared before stop-system-under-test: both bind to
-                                     post-integration-test, and same-phase executions of one plugin run
+                                <!-- Must be declared before stop-system-under-test: both bind after
+                                     integration-test, and same-phase executions of one plugin run
                                      in POM declaration order. Captures logs while the stack still exists —
                                      Failsafe records failures without failing the build until the later
                                      verify phase, so by then the stack below would already be gone. -->
                                 <id>capture-e2e-diagnostics</id>
-                                <phase>post-integration-test</phase>
+                                <phase>after:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -155,7 +155,7 @@
                             </execution>
                             <execution>
                                 <id>stop-system-under-test</id>
-                                <phase>post-integration-test</phase>
+                                <phase>after:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -218,7 +218,7 @@
                         <executions>
                             <execution>
                                 <id>reset-secure-system-under-test</id>
-                                <phase>pre-integration-test</phase>
+                                <phase>before:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -237,7 +237,7 @@
                             </execution>
                             <execution>
                                 <id>start-secure-system-under-test</id>
-                                <phase>pre-integration-test</phase>
+                                <phase>before:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -265,7 +265,7 @@
                                      previous execution returns. This "wait" subcommand instead blocks until
                                      the container actually exits and fails the build on a nonzero code. -->
                                 <id>await-secure-provisioning</id>
-                                <phase>pre-integration-test</phase>
+                                <phase>before:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -286,7 +286,7 @@
                                      the e2e profile's capture-e2e-diagnostics: same-phase executions of one
                                      plugin run in POM declaration order, and the stack must still exist. -->
                                 <id>capture-security-e2e-diagnostics</id>
-                                <phase>post-integration-test</phase>
+                                <phase>after:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>
@@ -300,7 +300,7 @@
                             </execution>
                             <execution>
                                 <id>stop-secure-system-under-test</id>
-                                <phase>post-integration-test</phase>
+                                <phase>after:integration-test</phase>
                                 <goals>
                                     <goal>exec</goal>
                                 </goals>

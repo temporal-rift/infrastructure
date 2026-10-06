@@ -142,7 +142,7 @@ jobs:
             echo "web_client_tag=$(git -C game-client rev-parse --short HEAD)"
           } >> "$GITHUB_OUTPUT"
 
-      # The timeline-service image resolves shared artifacts from GitHub Packages, which needs a token even for public packages.
+      # Maven-built images resolve shared artifacts from GitHub Packages, which needs a token even for public packages.
       - name: Provide Maven settings to image builds
         env:
           PACKAGES_USER: ${{ github.actor }}

@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   build:
@@ -29,9 +30,17 @@ jobs:
         with:
           java-version: 26
           java-distribution: temurin
-          maven-version: 3.9.13
+          maven-version: 4.0.0-rc-7
           settings-githubServer: false
           checkout-enabled: false
+          settings-servers: |
+            [
+              {
+                "id": "github",
+                "username": "${{ github.actor }}",
+                "password": "${{ secrets.GITHUB_TOKEN }}"
+              }
+            ]
 
       - name: Cache Maven packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
