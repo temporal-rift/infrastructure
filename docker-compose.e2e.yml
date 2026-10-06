@@ -350,6 +350,8 @@ services:
       dockerfile: browser-e2e/Dockerfile
       secrets:
         - maven_settings
+    secrets:
+      - maven_settings
     profiles: [test]
     environment:
       # Read via ${env.X} in pom.xml's failsafe systemPropertyVariables -- Compose `environment:`
