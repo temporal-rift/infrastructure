@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   # Epics closed close together queue rather than cancel each other: each deserves its own verdict.

@@ -47,6 +47,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   # One browser proof at a time per triggering ref -- the deployment holds a fixed Compose project
@@ -140,6 +141,18 @@ jobs:
             echo "read_service_tag=$(git -C read-service rev-parse --short HEAD)"
             echo "web_client_tag=$(git -C game-client rev-parse --short HEAD)"
           } >> "$GITHUB_OUTPUT"
+
+      # The timeline-service image resolves shared artifacts from GitHub Packages, which needs a token even for public packages.
+      - name: Provide Maven settings to image builds
+        env:
+          PACKAGES_USER: ${{ github.actor }}
+          PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo 'MAVEN_SETTINGS<<MAVEN_SETTINGS_EOF'
+            printf '<settings><servers><server><id>github</id><username>%s</username><password>%s</password></server></servers></settings>\n' "$PACKAGES_USER" "$PACKAGES_TOKEN"
+            echo 'MAVEN_SETTINGS_EOF'
+          } >> "$GITHUB_ENV"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1

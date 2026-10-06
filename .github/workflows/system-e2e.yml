@@ -51,6 +51,7 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 concurrency:
   # One system proof at a time per triggering ref — the run holds fixed host ports.
@@ -151,6 +152,18 @@ jobs:
             exit 1
           fi
 
+      # The timeline-service image resolves shared artifacts from GitHub Packages, which needs a token even for public packages.
+      - name: Provide Maven settings to image builds
+        env:
+          PACKAGES_USER: ${{ github.actor }}
+          PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo 'MAVEN_SETTINGS<<MAVEN_SETTINGS_EOF'
+            printf '<settings><servers><server><id>github</id><username>%s</username><password>%s</password></server></servers></settings>\n' "$PACKAGES_USER" "$PACKAGES_TOKEN"
+            echo 'MAVEN_SETTINGS_EOF'
+          } >> "$GITHUB_ENV"
+
       # checkout-enabled defaults to true and performs its own internal checkout of this repo at
       # the workspace root — deleting the workspace's contents first. That destroys the sibling
       # checkouts above (infrastructure/, game-service/, timeline-service/, read-service/) that
@@ -170,7 +183,7 @@ jobs:
       - name: Cache Maven packages
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: ~/.m2
+          path: ~/.m2/repository
           key: ${{ runner.os }}-m2-e2e-${{ hashFiles('*/pom.xml', '*/*/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2-e2e-
 
