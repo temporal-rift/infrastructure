@@ -18,8 +18,8 @@ ENV JAVA_HOME=/usr/lib/jvm/temurin-26
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
 # dlcdn.apache.org only serves the current release of each line -- the pinned version 404s once
-# the next 3.9.x ships. Maven Central keeps every version and publishes a checksum to verify.
-ARG MAVEN_VERSION=3.9.13
+# the next line ships. Maven Central keeps every version and publishes a checksum to verify.
+ARG MAVEN_VERSION=4.0.0-rc-7
 RUN maven_base="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.tar.gz" \
     && wget -q "$maven_base" -O /tmp/maven.tar.gz \
     && echo "$(wget -qO- "${maven_base}.sha512" | cut -d' ' -f1)  /tmp/maven.tar.gz" | sha512sum -c - \
@@ -29,7 +29,9 @@ ENV PATH="/opt/apache-maven-${MAVEN_VERSION}/bin:${PATH}"
 
 WORKDIR /workspace
 COPY pom.xml ./
-RUN mvn --batch-mode --quiet dependency:go-offline
+COPY .mvn .mvn
+RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml \
+    mvn --batch-mode --quiet dependency:go-offline
 COPY src ./src
 
-ENTRYPOINT ["mvn", "--batch-mode", "-Pbrowser-e2e", "verify"]
+ENTRYPOINT ["sh", "-ec", "mkdir -p /root/.m2 && cp /run/secrets/maven_settings /root/.m2/settings.xml && exec mvn --batch-mode -Pbrowser-e2e verify"]

@@ -90,6 +90,8 @@ services:
   config-server:
     build:
       context: ./config-server
+      secrets:
+        - maven_settings
     volumes:
       - ./config-server/config-repo:/config:ro
     ports:

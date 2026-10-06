@@ -152,7 +152,7 @@ jobs:
             exit 1
           fi
 
-      # The timeline-service image resolves shared artifacts from GitHub Packages, which needs a token even for public packages.
+      # Maven-built images resolve shared artifacts from GitHub Packages, which needs a token even for public packages.
       - name: Provide Maven settings to image builds
         env:
           PACKAGES_USER: ${{ github.actor }}
@@ -174,9 +174,17 @@ jobs:
         with:
           java-version: 26
           java-distribution: temurin
-          maven-version: 3.9.13
+          maven-version: 4.0.0-rc-7
           settings-githubServer: false
           checkout-enabled: false
+          settings-servers: |
+            [
+              {
+                "id": "github",
+                "username": "${{ github.actor }}",
+                "password": "${{ secrets.GITHUB_TOKEN }}"
+              }
+            ]
 
       # Keyed on all four repositories' POMs — a dependency bump in any of them
       # must not reuse a stale cache.
@@ -208,14 +216,14 @@ jobs:
         run: mvn --batch-mode verify -Pe2e
 
       # For a test failure, Failsafe's verify goal (which actually fails the build) runs at the
-      # `verify` phase, after post-integration-test's capture-e2e-diagnostics has already written
+      # `verify` phase, after after:integration-test's capture-e2e-diagnostics has already written
       # target/e2e-diagnostics — so this step normally just collects that output.
       #
-      # But a failure in pre-integration-test (start-system-under-test itself, e.g. a container
-      # never becoming healthy) halts the build there: Maven never reaches post-integration-test,
+      # But a failure in before:integration-test (start-system-under-test itself, e.g. a container
+      # never becoming healthy) halts the build there: Maven never reaches after:integration-test,
       # so capture-e2e-diagnostics never runs and target/e2e-diagnostics never exists — yet this is
       # exactly when there's most to diagnose. Nothing has torn the stack down at that point either
-      # (stop-system-under-test is also post-integration-test, and the workflow's own teardown step
+      # (stop-system-under-test is also after:integration-test, and the workflow's own teardown step
       # below hasn't run yet), so a direct fallback capture here can still reach live containers.
       - name: Collect diagnostics
         if: failure()
@@ -223,7 +231,7 @@ jobs:
         run: |
           mkdir -p ../e2e-diagnostics
           if [ ! -f target/e2e-diagnostics/compose-ps.txt ]; then
-            echo "target/e2e-diagnostics/compose-ps.txt missing — Maven's capture execution did not run (pre-integration-test failure). Falling back to direct capture."
+            echo "target/e2e-diagnostics/compose-ps.txt missing — Maven's capture execution did not run (before:integration-test failure). Falling back to direct capture."
             sh src/test/resources/capture-e2e-diagnostics.sh || true
           fi
           if [ ! -f target/e2e-diagnostics/compose-ps.txt ]; then
@@ -252,7 +260,7 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
-      # Failsafe's post-integration-test teardown does not run if the job is cancelled or the JVM dies.
+      # Failsafe's after:integration-test teardown does not run if the job is cancelled or the JVM dies.
       # Scoped to the `temporal-rift-e2e` project name, so it removes exactly what this run created and
       # cannot touch any other Compose project on the runner.
       - name: Tear down system under test

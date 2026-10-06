@@ -250,10 +250,10 @@ mvn verify -Pe2e
 The test project is named `temporal-rift-e2e` and uses host ports `18080` (game-service), `18082` (read-service),
 `15341` (VictoriaLogs UI/query), `22201` (VictoriaLogs syslog listener), `19092` (Kafka, for test-only
 fault-injection/probe clients), `19308` (kafka-exporter, for the dead-letter-traffic proof), and `19411` (Zipkin,
-for the trace-continuity proof), so it can run beside the normal local stack. At the beginning of each run, only a stale `temporal-rift-e2e` project is reset. The post-integration-test
+for the trace-continuity proof), so it can run beside the normal local stack. At the beginning of each run, only a stale `temporal-rift-e2e` project is reset. The after:integration-test
 phase removes only that same project.
 
-If Maven or the machine is interrupted before post-integration-test, recover with:
+If Maven or the machine is interrupted before after:integration-test, recover with:
 
 ```bash
 docker compose -p temporal-rift-e2e -f compose.yml -f src/test/resources/compose.e2e.yml down -v --remove-orphans
@@ -285,7 +285,7 @@ the container state at failure, and the Failsafe/Surefire reports — enough to 
 asserted transition failed without reproducing locally. Nothing is uploaded on a green run.
 
 The Compose logs and container state are captured by a Maven execution bound to the `e2e` profile's
-`post-integration-test` phase, ordered before `stop-system-under-test`. That ordering matters: Failsafe records test
+`after:integration-test` phase, ordered before `stop-system-under-test`. That ordering matters: Failsafe records test
 failures at the `integration-test` phase without failing the build, and only fails it later at `verify` — so the
 stack is already torn down by the time a single `mvn verify -Pe2e` invocation returns control to a shell. Capturing
 from the workflow after that point would find nothing; capturing inside the build, before teardown, is what makes the
