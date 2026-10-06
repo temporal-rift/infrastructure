@@ -152,7 +152,7 @@ jobs:
             exit 1
           fi
 
-      # The timeline-service image resolves shared artifacts from GitHub Packages, which needs a token even for public packages.
+      # The service images resolve shared artifacts from GitHub Packages, which needs a token even for public packages.
       - name: Provide Maven settings to image builds
         env:
           PACKAGES_USER: ${{ github.actor }}

@@ -11,9 +11,9 @@ export MAVEN_SETTINGS="$(cat ~/.m2/settings.xml)"
 docker compose -f infrastructure/compose.yml up --build
 ```
 
-`MAVEN_SETTINGS` is your Maven user settings, passed to the image build as a secret: the timeline-service build
-resolves shared artifacts from GitHub Packages, which needs a `github` server entry holding a token with
-`read:packages` even for public packages.
+`MAVEN_SETTINGS` is your Maven user settings, passed to the image builds as a secret: the game-service,
+timeline-service and read-service builds resolve shared artifacts from GitHub Packages, which needs a `github` server
+entry holding a token with `read:packages` even for public packages.
 
 The stack starts the three services, PostgreSQL (one database per service), Kafka, Kafka UI, Zipkin, VictoriaLogs, a
 Config Server, and the metrics/dashboards/alerting stack described below. It also creates `game.events`,

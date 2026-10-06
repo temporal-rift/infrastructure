@@ -17,6 +17,7 @@ group "default" {
 
 target "game-service" {
   context = "game-service"
+  secret  = ["id=maven_settings,env=MAVEN_SETTINGS"]
   tags    = ["temporal-rift/game-service:${GAME_SERVICE_TAG}"]
 }
 
@@ -28,6 +29,7 @@ target "timeline-service" {
 
 target "read-service" {
   context = "read-service"
+  secret  = ["id=maven_settings,env=MAVEN_SETTINGS"]
   tags    = ["temporal-rift/read-service:${READ_SERVICE_TAG}"]
 }
 
