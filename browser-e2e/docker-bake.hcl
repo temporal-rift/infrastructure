@@ -22,6 +22,7 @@ target "game-service" {
 
 target "timeline-service" {
   context = "timeline-service"
+  secret  = ["id=maven_settings,env=MAVEN_SETTINGS"]
   tags    = ["temporal-rift/timeline-service:${TIMELINE_SERVICE_TAG}"]
 }
 

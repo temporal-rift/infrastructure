@@ -203,6 +203,8 @@ services:
   timeline-service:
     build:
       context: ../timeline-service
+      secrets:
+        - maven_settings
     environment:
       <<: *local-issuer-environment
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/timeline_service
@@ -271,6 +273,10 @@ services:
         syslog-address: tcp://127.0.0.1:514
         syslog-format: rfc5424
         tag: read-service
+
+secrets:
+  maven_settings:
+    environment: MAVEN_SETTINGS
 
 volumes:
   postgres-data:
