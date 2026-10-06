@@ -237,7 +237,7 @@ and removes the named Compose project and its volume afterward.
 Prerequisites:
 
 - Docker with Compose v2.24.4 or newer (the test override uses the Compose `!override` tag)
-- Maven 3.9.16 or newer
+- Maven 4.0.0-rc-7 or newer
 - JDK 26 selected through `JAVA_HOME` and first on `PATH`
 - host ports `18080`, `18082`, `15341`, `22201`, `19092`, `19308`, and `19411` available
 
