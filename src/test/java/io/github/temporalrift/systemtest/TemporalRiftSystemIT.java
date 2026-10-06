@@ -233,13 +233,7 @@ class TemporalRiftSystemIT {
                 roundOneEvents,
                 roundIneligibilityProbed,
                 playerTargetingProbed);
-        playEraOneRoundThree(
-                gameId,
-                host,
-                players,
-                roundTwoEvents,
-                roundIneligibilityProbed,
-                playerTargetingProbed);
+        playEraOneRoundThree(gameId, host, players, roundTwoEvents, roundIneligibilityProbed, playerTargetingProbed);
 
         assertThat(roundIneligibilityProbed[0])
                 .as("the round-ineligibility rejection (422-12) was exercised at least once")
@@ -1042,14 +1036,7 @@ class TemporalRiftSystemIT {
                         .assertStatus(202);
             } else {
                 submitEligibleAction(
-                        player,
-                        players,
-                        gameId,
-                        1,
-                        state,
-                        List.of(),
-                        roundIneligibilityProbed,
-                        playerTargetingProbed);
+                        player, players, gameId, 1, state, List.of(), roundIneligibilityProbed, playerTargetingProbed);
             }
         }
         awaitRoundClosed(host, gameId, 1, 1, players.size());
@@ -1276,11 +1263,7 @@ class TemporalRiftSystemIT {
     }
 
     private void playEligibleCard(
-            Actor player,
-            UUID gameId,
-            int roundNumber,
-            PlayerState state,
-            List<ActiveEvent> previousRoundEvents) {
+            Actor player, UUID gameId, int roundNumber, PlayerState state, List<ActiveEvent> previousRoundEvents) {
         var decoy = state.hand().stream()
                 .filter(Card::isPlayableThisRound)
                 .filter(candidate -> DECOY.equals(candidate.cardType()))
@@ -1365,8 +1348,7 @@ class TemporalRiftSystemIT {
         scenario.awaitPlayerState(
                 actor,
                 gameId,
-                candidate ->
-                        candidate.eraNumber() > eraNumber
+                candidate -> candidate.eraNumber() > eraNumber
                                 || (candidate.eraNumber() == eraNumber
                                         && !("ACTION_ROUND_" + roundNumber).equals(candidate.phase())),
                 actor.name() + " observes action round " + roundNumber + " close after " + expectedSubmittedCount
