@@ -1349,8 +1349,8 @@ class TemporalRiftSystemIT {
                 actor,
                 gameId,
                 candidate -> candidate.eraNumber() > eraNumber
-                                || (candidate.eraNumber() == eraNumber
-                                        && !("ACTION_ROUND_" + roundNumber).equals(candidate.phase())),
+                        || (candidate.eraNumber() == eraNumber
+                                && !("ACTION_ROUND_" + roundNumber).equals(candidate.phase())),
                 actor.name() + " observes action round " + roundNumber + " close after " + expectedSubmittedCount
                         + " submitted actions");
     }
