@@ -43,7 +43,6 @@ import io.github.temporalrift.systemtest.TemporalRiftScenario.Card;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.PlayerState;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.PlayerView;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.RevealedIntel;
-import io.github.temporalrift.systemtest.TemporalRiftScenario.RoundState;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.ScoreBoard;
 
 class TemporalRiftSystemIT {
@@ -217,7 +216,7 @@ class TemporalRiftSystemIT {
         var roundIneligibilityProbed = new boolean[] {false};
         var playerTargetingProbed = new boolean[] {false};
 
-        playEraOneRoundOne(
+        var roundOneEvents = playEraOneRoundOne(
                 gameId,
                 host,
                 players,
@@ -225,15 +224,22 @@ class TemporalRiftSystemIT {
                 budgetedSpecial,
                 roundIneligibilityProbed,
                 playerTargetingProbed);
-        playEraOneRoundTwo(
+        var roundTwoEvents = playEraOneRoundTwo(
                 gameId,
                 host,
                 players,
                 budgetedPlayer,
                 budgetedSpecial,
+                roundOneEvents,
                 roundIneligibilityProbed,
                 playerTargetingProbed);
-        playEraOneRoundThree(gameId, host, players, roundIneligibilityProbed, playerTargetingProbed);
+        playEraOneRoundThree(
+                gameId,
+                host,
+                players,
+                roundTwoEvents,
+                roundIneligibilityProbed,
+                playerTargetingProbed);
 
         assertThat(roundIneligibilityProbed[0])
                 .as("the round-ineligibility rejection (422-12) was exercised at least once")
@@ -623,7 +629,7 @@ class TemporalRiftSystemIT {
                             .as("STALL is unavailable in the configured final era")
                             .isFalse());
             for (var player : allPlayers) {
-                playAnyEligibleAction(player, allPlayers, gameId, 2, 3, roundThreeStates.get(player));
+                playAnyEligibleAction(player, allPlayers, gameId, 2, 3, roundThreeStates.get(player), List.of());
             }
 
             var afterGameEnd = scenario.awaitPlayerState(
@@ -897,6 +903,7 @@ class TemporalRiftSystemIT {
     }
 
     private void playEraToCompletion(UUID gameId, List<Actor> players, int eraNumber) {
+        var previousRoundEvents = List.<ActiveEvent>of();
         for (var roundNumber = 1; roundNumber <= 3; roundNumber++) {
             var round = roundNumber;
             var states = players.stream()
@@ -910,8 +917,10 @@ class TemporalRiftSystemIT {
                         .allSatisfy(view -> assertThat(view.faction()).isNull());
             }
             for (var player : players) {
-                playAnyEligibleAction(player, players, gameId, eraNumber, round, states.get(player));
+                playAnyEligibleAction(
+                        player, players, gameId, eraNumber, round, states.get(player), previousRoundEvents);
             }
+            previousRoundEvents = states.get(players.getFirst()).activeEvents();
         }
     }
 
@@ -920,7 +929,13 @@ class TemporalRiftSystemIT {
     // round with a valid action wherever one is available -- a player with nothing eligible is simply
     // skipped, letting the round's own timer close it, exactly as production allows.
     private void playAnyEligibleAction(
-            Actor player, List<Actor> allPlayers, UUID gameId, int eraNumber, int roundNumber, PlayerState state) {
+            Actor player,
+            List<Actor> allPlayers,
+            UUID gameId,
+            int eraNumber,
+            int roundNumber,
+            PlayerState state,
+            List<ActiveEvent> previousRoundEvents) {
         // An early Stall locks this target for later rounds; the dedicated Scan scenario covers that interaction.
         var eligible = state.hand().stream()
                 .filter(Card::isPlayableThisRound)
@@ -930,7 +945,13 @@ class TemporalRiftSystemIT {
             return;
         }
 
-        var card = eligible.getFirst();
+        var card = eligible.stream()
+                .filter(candidate -> !"TRACE".equals(candidate.cardType()) || !previousRoundEvents.isEmpty())
+                .findFirst()
+                .orElse(null);
+        if (card == null) {
+            return;
+        }
         if (PLAYER_TARGETING_CARD_TYPES.contains(card.cardType())) {
             playAgainstPlayers(player, gameId, eraNumber, roundNumber, card, opponentTargets(card, player, allPlayers))
                     .assertStatus(202);
@@ -955,7 +976,7 @@ class TemporalRiftSystemIT {
             return;
         }
 
-        var event = state.activeEvents().getFirst();
+        var event = targetEventFor(card, state.activeEvents(), previousRoundEvents);
         var sourceOutcomeId = TWO_OUTCOME_CARD_TYPES.contains(card.cardType()) ? sourceOutcome(event) : null;
         scenario.as(player)
                 .playCard(gameId, eraNumber, roundNumber, card, event.eventId(), sourceOutcomeId, targetOutcome(event))
@@ -1001,7 +1022,7 @@ class TemporalRiftSystemIT {
                 .orElseThrow();
     }
 
-    private void playEraOneRoundOne(
+    private List<ActiveEvent> playEraOneRoundOne(
             UUID gameId,
             Actor host,
             List<Actor> players,
@@ -1009,8 +1030,11 @@ class TemporalRiftSystemIT {
             String budgetedSpecial,
             boolean[] roundIneligibilityProbed,
             boolean[] playerTargetingProbed) {
+        var states = players.stream()
+                .collect(Collectors.toMap(player -> player, player -> awaitPlayerAtRound(player, gameId, 1)));
+        var roundEvents = states.get(host).activeEvents();
         for (var player : players) {
-            var state = awaitPlayerAtRound(player, gameId, 1);
+            var state = states.get(player);
             if (player.equals(budgetedPlayer)) {
                 var targetEvent = state.activeEvents().getFirst();
                 scenario.as(player)
@@ -1018,18 +1042,27 @@ class TemporalRiftSystemIT {
                         .assertStatus(202);
             } else {
                 submitEligibleAction(
-                        player, players, gameId, 1, state, roundIneligibilityProbed, playerTargetingProbed);
+                        player,
+                        players,
+                        gameId,
+                        1,
+                        state,
+                        List.of(),
+                        roundIneligibilityProbed,
+                        playerTargetingProbed);
             }
         }
         awaitRoundClosed(host, gameId, 1, 1, players.size());
+        return roundEvents;
     }
 
-    private void playEraOneRoundTwo(
+    private List<ActiveEvent> playEraOneRoundTwo(
             UUID gameId,
             Actor host,
             List<Actor> players,
             Actor budgetedPlayer,
             String budgetedSpecial,
+            List<ActiveEvent> previousRoundEvents,
             boolean[] roundIneligibilityProbed,
             boolean[] playerTargetingProbed) {
         var otherPlayers = players.stream()
@@ -1061,15 +1094,18 @@ class TemporalRiftSystemIT {
                 .hasSizeGreaterThanOrEqualTo(2);
         var firstCard = proberCards.get(0);
         var secondCard = proberCards.get(1);
-        var proberEvent = otherStates.get(duplicateProber).activeEvents().getFirst();
+        var proberEvent =
+                targetEventFor(firstCard, otherStates.get(duplicateProber).activeEvents(), previousRoundEvents);
         var firstSource = TWO_OUTCOME_CARD_TYPES.contains(firstCard.cardType()) ? sourceOutcome(proberEvent) : null;
         scenario.as(duplicateProber)
                 .playCard(gameId, 1, 2, firstCard, proberEvent.eventId(), firstSource, targetOutcome(proberEvent))
                 .assertStatus(202);
 
-        var secondSource = TWO_OUTCOME_CARD_TYPES.contains(secondCard.cardType()) ? sourceOutcome(proberEvent) : null;
+        var secondEvent =
+                targetEventFor(secondCard, otherStates.get(duplicateProber).activeEvents(), previousRoundEvents);
+        var secondSource = TWO_OUTCOME_CARD_TYPES.contains(secondCard.cardType()) ? sourceOutcome(secondEvent) : null;
         var duplicate = scenario.as(duplicateProber)
-                .playCard(gameId, 1, 2, secondCard, proberEvent.eventId(), secondSource, targetOutcome(proberEvent));
+                .playCard(gameId, 1, 2, secondCard, secondEvent.eventId(), secondSource, targetOutcome(secondEvent));
         duplicate.assertStatus(409);
         assertThat(duplicate.body().path("code").asText()).isEqualTo("409-02");
 
@@ -1082,7 +1118,7 @@ class TemporalRiftSystemIT {
         forged.assertStatus(422);
         assertThat(forged.body().path("code").asText()).isEqualTo("422-06");
 
-        var budgetedEvent = budgetedState.activeEvents().getFirst();
+        var budgetedEvent = targetEventFor(budgetedCard, budgetedState.activeEvents(), previousRoundEvents);
         var budgetedSource =
                 TWO_OUTCOME_CARD_TYPES.contains(budgetedCard.cardType()) ? sourceOutcome(budgetedEvent) : null;
         scenario.as(budgetedPlayer)
@@ -1109,16 +1145,19 @@ class TemporalRiftSystemIT {
                 gameId,
                 2,
                 otherStates.get(plainSubmitter),
+                previousRoundEvents,
                 roundIneligibilityProbed,
                 playerTargetingProbed);
 
         awaitRoundClosed(host, gameId, 1, 2, players.size());
+        return budgetedState.activeEvents();
     }
 
     private void playEraOneRoundThree(
             UUID gameId,
             Actor host,
             List<Actor> players,
+            List<ActiveEvent> previousRoundEvents,
             boolean[] roundIneligibilityProbed,
             boolean[] playerTargetingProbed) {
         var states = players.stream()
@@ -1132,7 +1171,14 @@ class TemporalRiftSystemIT {
                 .hasSize(2);
         for (var player : submitters) {
             submitEligibleAction(
-                    player, players, gameId, 3, states.get(player), roundIneligibilityProbed, playerTargetingProbed);
+                    player,
+                    players,
+                    gameId,
+                    3,
+                    states.get(player),
+                    previousRoundEvents,
+                    roundIneligibilityProbed,
+                    playerTargetingProbed);
         }
         awaitRoundClosed(host, gameId, 1, 3, submitters.size());
     }
@@ -1151,6 +1197,7 @@ class TemporalRiftSystemIT {
             UUID gameId,
             int roundNumber,
             PlayerState state,
+            List<ActiveEvent> previousRoundEvents,
             boolean[] roundIneligibilityProbed,
             boolean[] playerTargetingProbed) {
         if (probeRoundIneligibilityIfAvailable(player, gameId, roundNumber, state)) {
@@ -1173,7 +1220,7 @@ class TemporalRiftSystemIT {
             return;
         }
 
-        playEligibleCard(player, gameId, roundNumber, state);
+        playEligibleCard(player, gameId, roundNumber, state, previousRoundEvents);
     }
 
     // NULLIFY names as many distinct opponents as its grade allows; every other player-targeting card names one.
@@ -1222,12 +1269,18 @@ class TemporalRiftSystemIT {
         rejected.assertStatus(422);
         assertThat(rejected.body().path("code").asText()).isEqualTo("422-12");
 
-        var status = scenario.as(player).getRoundStatus(gameId, 1, roundNumber).assertStatus(200);
-        assertThat(RoundState.from(status.body()).pendingPlayerIds()).contains(player.playerId());
+        var currentState = PlayerState.from(
+                scenario.as(player).getPlayerState(gameId).assertStatus(200).body());
+        assertThat(currentState.pendingPlayerIds()).contains(player.playerId());
         return true;
     }
 
-    private void playEligibleCard(Actor player, UUID gameId, int roundNumber, PlayerState state) {
+    private void playEligibleCard(
+            Actor player,
+            UUID gameId,
+            int roundNumber,
+            PlayerState state,
+            List<ActiveEvent> previousRoundEvents) {
         var decoy = state.hand().stream()
                 .filter(Card::isPlayableThisRound)
                 .filter(candidate -> DECOY.equals(candidate.cardType()))
@@ -1239,7 +1292,7 @@ class TemporalRiftSystemIT {
             return;
         }
         var card = eligibleEventTargetingCard(state);
-        var targetEvent = state.activeEvents().getFirst();
+        var targetEvent = targetEventFor(card, state.activeEvents(), previousRoundEvents);
         var sourceOutcomeId = TWO_OUTCOME_CARD_TYPES.contains(card.cardType()) ? sourceOutcome(targetEvent) : null;
         scenario.as(player)
                 .playCard(
@@ -1268,6 +1321,14 @@ class TemporalRiftSystemIT {
                 .filter(candidate -> !DECOY.equals(candidate.cardType()))
                 .filter(candidate -> !"STALL".equals(candidate.cardType()) || "ACTION_ROUND_3".equals(state.phase()))
                 .toList();
+    }
+
+    private static ActiveEvent targetEventFor(
+            Card card, List<ActiveEvent> currentRoundEvents, List<ActiveEvent> previousRoundEvents) {
+        var eligibleEvents = "TRACE".equals(card.cardType()) ? previousRoundEvents : currentRoundEvents;
+        return eligibleEvents.stream()
+                .findFirst()
+                .orElseThrow(() -> new AssertionError(card.cardType() + " has no eligible event target"));
     }
 
     private static boolean hasEligibleCard(PlayerState state) {
@@ -1301,13 +1362,15 @@ class TemporalRiftSystemIT {
 
     private void awaitRoundClosed(
             Actor actor, UUID gameId, int eraNumber, int roundNumber, int expectedSubmittedCount) {
-        scenario.awaitRoundState(
+        scenario.awaitPlayerState(
                 actor,
                 gameId,
-                eraNumber,
-                roundNumber,
                 candidate ->
-                        "CLOSED".equals(candidate.status()) && candidate.submittedCount() == expectedSubmittedCount);
+                        candidate.eraNumber() > eraNumber
+                                || (candidate.eraNumber() == eraNumber
+                                        && !("ACTION_ROUND_" + roundNumber).equals(candidate.phase())),
+                actor.name() + " observes action round " + roundNumber + " close after " + expectedSubmittedCount
+                        + " submitted actions");
     }
 
     private void verifyScoresAndLaterEraProjection(
