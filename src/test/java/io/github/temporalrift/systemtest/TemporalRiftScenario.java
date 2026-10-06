@@ -47,17 +47,6 @@ final class TemporalRiftScenario {
                 description);
     }
 
-    RoundState awaitRoundState(
-            Actor actor, UUID gameId, int eraNumber, int roundNumber, Predicate<RoundState> expected) {
-        return eventually(
-                () -> {
-                    var response = as(actor).getRoundStatus(gameId, eraNumber, roundNumber);
-                    return response.status() == 200 ? Optional.of(RoundState.from(response.body())) : Optional.empty();
-                },
-                expected,
-                "round " + eraNumber + "." + roundNumber + " transition");
-    }
-
     ScoreBoard awaitScores(Actor actor, UUID gameId, Predicate<ScoreBoard> expected) {
         return awaitScores(actor, gameId, expected, "score publication");
     }
@@ -127,10 +116,6 @@ final class TemporalRiftScenario {
 
         JsonHttpClient.Response getGameHistory(UUID gameId) {
             return http.get(readUri("/games/" + gameId + "/history"), actor);
-        }
-
-        JsonHttpClient.Response getRoundStatus(UUID gameId, int eraNumber, int roundNumber) {
-            return http.get(gameUri(roundPath(gameId, eraNumber, roundNumber) + "/status"), actor);
         }
 
         JsonHttpClient.Response playCard(
@@ -236,6 +221,7 @@ final class TemporalRiftScenario {
             int myScore,
             List<ActiveEvent> activeEvents,
             List<PlayerView> players,
+            List<UUID> pendingPlayerIds,
             List<RevealedIntel> revealedIntel) {
 
         static PlayerState from(JsonNode body) {
@@ -251,6 +237,10 @@ final class TemporalRiftScenario {
                     body.path("myScore").asInt(),
                     stream(body.path("activeEvents")).map(ActiveEvent::from).toList(),
                     stream(body.path("players")).map(PlayerView::from).toList(),
+                    stream(body.path("phaseContext").path("actionRoundProgress").path("pendingPlayerIds"))
+                            .map(JsonNode::asText)
+                            .map(UUID::fromString)
+                            .toList(),
                     stream(body.path("myRevealedIntel"))
                             .filter(node ->
                                     "PROBABILITY".equals(node.path("kind").asText()))
@@ -329,27 +319,6 @@ final class TemporalRiftScenario {
         static PlayerView from(JsonNode body) {
             return new PlayerView(
                     uuid(body, "playerId"), body.path("score").asInt(), nullableText(body.get("faction")));
-        }
-    }
-
-    record RoundState(
-            int eraNumber,
-            int roundNumber,
-            String status,
-            int submittedCount,
-            int totalPlayers,
-            List<UUID> pendingPlayerIds) {
-
-        static RoundState from(JsonNode body) {
-            return new RoundState(
-                    body.path("eraNumber").asInt(),
-                    body.path("roundNumber").asInt(),
-                    body.path("status").asText(),
-                    body.path("submittedCount").asInt(),
-                    body.path("totalPlayers").asInt(),
-                    stream(body.path("pendingPlayerIds"))
-                            .map(node -> UUID.fromString(node.asText()))
-                            .toList());
         }
     }
 
