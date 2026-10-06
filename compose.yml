@@ -168,6 +168,8 @@ services:
   game-service:
     build:
       context: ../game-service
+      secrets:
+        - maven_settings
     environment:
       <<: *local-issuer-environment
       SPRING_PROFILES_ACTIVE: docker
@@ -243,6 +245,8 @@ services:
   read-service:
     build:
       context: ../read-service
+      secrets:
+        - maven_settings
     environment:
       <<: *local-issuer-environment
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/read_service
