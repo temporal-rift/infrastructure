@@ -416,6 +416,37 @@ Teardown removes only the task-owned project, reusing and protecting unrelated w
 docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml down -v --remove-orphans
 ```
 
+## Isolated simulation lanes
+
+`compose.simulation.yml` is an overlay over `compose.yml` that provides one isolated,
+reproducible execution lane per case: game-service and timeline-service run with their
+isolated execution mode enabled (`GAME_SIMULATION_ENABLED=true`), every resource is
+scoped to the task-owned `temporal-rift-sim-<lane>` project with lane/experiment/case
+labels, and only the lane's service ports are published on loopback. Bots use the normal
+authenticated participant APIs with deterministic per-seat identities; only the
+operator reaches the control operations, and a separate observer reads that lane's
+event topics with independent credentials.
+
+Each lane deployment writes an immutable manifest (`simulation/lanes/<lane>/`) recording
+service revisions, adopted contract versions, rules/content digests with retained bundle
+contents, the `LOGICAL` timing mode, and identity attribution without secrets.
+`verify-simulation-deployment.sh` fails before startup on any missing or drifted input
+(`MANIFEST_MISMATCH`), and `check-simulation-readiness.sh` requires both services
+drained on the same bundle plus downstream watermark observation before gameplay.
+Teardown removes only the named lane project; durable workbench evidence lives outside
+it. See `simulation/README.md` for the exact provision, readiness, cancellation, and
+validation commands.
+
+```bash
+export SIMULATION_LANE=<lane> SIMULATION_EXPERIMENT=<experiment> SIMULATION_CASE=<case>
+export JWT_ISSUER_URI=https://<issuer-minting-lane-identities>
+bash scripts/write-simulation-manifest.sh
+bash scripts/verify-simulation-deployment.sh
+docker compose -p temporal-rift-sim-$SIMULATION_LANE -f compose.yml -f compose.simulation.yml up --build -d
+bash scripts/check-simulation-readiness.sh
+docker compose -p temporal-rift-sim-$SIMULATION_LANE -f compose.yml -f compose.simulation.yml down -v --remove-orphans
+```
+
 ## Browser end-to-end verification
 
 The command-only system E2E harness above proves cross-service behavior through direct HTTP commands; it never

@@ -5,4 +5,6 @@ target/
 *.iml
 # Generated per deployment; never commit an effective manifest.
 playtest/manifest.json
+# Generated per lane deployment; never commit an effective lane manifest or bundle.
+simulation/lanes/
 portal/

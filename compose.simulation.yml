@@ -1,0 +1,112 @@
+name: temporal-rift-sim-${SIMULATION_LANE:?SIMULATION_LANE must be set to the lane name}
+
+# Isolated reproducible simulation execution lane. This is an overlay over compose.yml: it
+# enables the isolated simulation execution mode on game-service and timeline-service, scopes
+# every resource to one task-owned lane project, publishes only the lane's service ports on
+# loopback, and requires an issuer capable of minting deterministic bot, operator, and observer
+# identities. Local-dev behavior in compose.yml is untouched.
+#
+# A lane runs one logical case at a time; bounded concurrency uses independent lanes, each
+# started as its own Compose project with its own broker, databases, and volumes. Durable
+# workbench evidence lives outside the disposable lane project.
+#
+# Lifecycle (always scoped to the named lane project; never disturbs other stacks):
+#
+#   export SIMULATION_LANE=<lane> SIMULATION_EXPERIMENT=<experiment> SIMULATION_CASE=<case>
+#   export JWT_ISSUER_URI=https://<issuer-capable-of-simulation-scopes>
+#   export SIMULATION_GAME_PORT=18180 SIMULATION_TIMELINE_PORT=18181 SIMULATION_READ_PORT=18182
+#   bash scripts/write-simulation-manifest.sh
+#   bash scripts/verify-simulation-deployment.sh
+#   bash scripts/check-simulation-readiness.sh  # once the lane is up, before gameplay
+#   docker compose -p temporal-rift-sim-$SIMULATION_LANE -f compose.yml -f compose.simulation.yml up --build -d
+#   docker compose -p temporal-rift-sim-$SIMULATION_LANE -f compose.yml -f compose.simulation.yml down -v --remove-orphans
+#
+# The lane always uses logical time driven through the control operations; there is no
+# accelerated wall-clock preset to label. The manifest records timingMode=LOGICAL for every lane.
+# Bot identities are deterministic subjects minted by the configured issuer for the case's
+# seat/player IDs: participant scopes for bots, simulation:control for the operator, and
+# simulation:observe for the lane observer. The manifest attributes that configuration without
+# recording any credential material.
+
+x-simulation-lane-labels: &simulation-lane-labels
+  com.temporal-rift.lane: "${SIMULATION_LANE:?SIMULATION_LANE must be set to the lane name}"
+  com.temporal-rift.experiment: "${SIMULATION_EXPERIMENT:?SIMULATION_EXPERIMENT must be set to the experiment name}"
+  com.temporal-rift.case: "${SIMULATION_CASE:?SIMULATION_CASE must be set to the case key}"
+
+services:
+  postgres:
+    ports: !override []
+    labels:
+      <<: *simulation-lane-labels
+
+  kafka:
+    ports: !override []
+    labels:
+      <<: *simulation-lane-labels
+
+  kafka-ui:
+    ports: !override []
+
+  zipkin:
+    ports: !override []
+
+  kafka-exporter:
+    ports: !override []
+
+  config-server:
+    ports: !override []
+
+  victorialogs:
+    ports: !override []
+
+  victoriametrics:
+    ports: !override []
+
+  alertmanager:
+    ports: !override []
+
+  vmalert:
+    ports: !override []
+
+  # Lanes authenticate against the configured issuer, which must be able to mint the
+  # deterministic bot subjects and the simulation scopes. The local interactive issuer is
+  # never part of a lane.
+  identity-provider:
+    profiles: [local-issuer]
+
+  game-service:
+    ports: !override
+      - "127.0.0.1:${SIMULATION_GAME_PORT:-18180}:8080"
+    labels:
+      <<: *simulation-lane-labels
+    environment:
+      GAME_SIMULATION_ENABLED: "true"
+      JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+    depends_on:
+      identity-provider: !reset null
+
+  timeline-service:
+    ports: !override
+      - "127.0.0.1:${SIMULATION_TIMELINE_PORT:-18181}:8080"
+    labels:
+      <<: *simulation-lane-labels
+    environment:
+      GAME_SIMULATION_ENABLED: "true"
+      JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+    depends_on:
+      identity-provider: !reset null
+
+  read-service:
+    ports: !override
+      - "127.0.0.1:${SIMULATION_READ_PORT:-18182}:8080"
+    labels:
+      <<: *simulation-lane-labels
+    deploy:
+      replicas: 1
+    environment:
+      JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+    depends_on:
+      identity-provider: !reset null
