@@ -142,7 +142,11 @@ final class GameScreen {
                     .click();
         } catch (TimeoutError e) {
             // The hand-selection timer keeps the first five itself and removes the offer mid-click.
-            if (isHandKeepOffered()) {
+            if (handSelectionSection()
+                            .getByLabel("Private card offer")
+                            .locator("li button")
+                            .count()
+                    > 0) {
                 throw e;
             }
         }
