@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -208,7 +209,9 @@ final class IsolationCheck {
     private static List<JsonNode> participantStates(List<NetworkPayloadRecorder.Exchange> exchanges) {
         return exchanges.stream()
                 .filter(exchange -> exchange.url().endsWith("/state") && exchange.status() == 200)
-                .map(exchange -> JSON.readTree(exchange.responseBody()))
+                .map(NetworkPayloadRecorder.Exchange::responseBody)
+                .filter(Objects::nonNull)
+                .map(JSON::readTree)
                 .toList();
     }
 
