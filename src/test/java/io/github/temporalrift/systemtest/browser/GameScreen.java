@@ -132,13 +132,20 @@ final class GameScreen {
     }
 
     void keepFirstFiveOfferedCards() {
-        var section = handSelectionSection();
-        var cards = section.getByLabel("Private card offer").locator("li button");
-        for (int i = 0; i < 5; i++) {
-            cards.nth(i).click();
+        try {
+            var section = handSelectionSection();
+            var cards = section.getByLabel("Private card offer").locator("li button");
+            for (int i = 0; i < 5; i++) {
+                cards.nth(i).click();
+            }
+            section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm five cards"))
+                    .click();
+        } catch (TimeoutError e) {
+            // The hand-selection timer keeps the first five itself and removes the offer mid-click.
+            if (isHandKeepOffered()) {
+                throw e;
+            }
         }
-        section.getByRole(AriaRole.BUTTON, new Locator.GetByRoleOptions().setName("Confirm five cards"))
-                .click();
     }
 
     // --- Action round ----------------------------------------------------
