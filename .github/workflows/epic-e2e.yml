@@ -37,7 +37,6 @@ jobs:
     permissions:
       issues: write
     steps:
-      # Work that does not pass end to end is not done, so anything short of three passes reopens the epic.
       - name: Report the result on the epic
         env:
           GH_TOKEN: ${{ github.token }}
@@ -52,5 +51,5 @@ jobs:
           if [[ "$SYSTEM" == success && "$BROWSER" == success && "$SECURITY" == success ]]; then
             gh issue comment "$EPIC" --body "End-to-end verification passed on every default branch (${summary}): ${RUN_URL}"
           else
-            gh issue reopen "$EPIC" --comment "End-to-end verification did not pass on the default branches (${summary}), so this epic is reopened until it does: ${RUN_URL}"
+            gh issue comment "$EPIC" --body "End-to-end verification did not pass on the default branches (${summary}): ${RUN_URL}"
           fi

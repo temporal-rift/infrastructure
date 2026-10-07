@@ -271,8 +271,8 @@ short-lived tokens accepted by the isolated `e2e-auth` container and must never 
 End-to-end suites do not run on pull requests or pushes. A per-PR run can only test one change against the other
 repositories' unchanged `main`, so a change spanning repositories fails until all of its parts merge. Instead,
 `.github/workflows/epic-e2e.yml` runs `system-e2e`, `browser-e2e`, and `security-e2e` against every repository's
-default branch when an issue labelled `epic` closes. It comments the result on the epic and reopens the epic when any
-suite does not pass. Label every epic `epic` when creating it.
+default branch when an issue labelled `epic` closes and comments the result on the epic. Label every epic `epic` when
+creating it.
 
 | Trigger | Sources used |
 |---|---|
