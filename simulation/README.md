@@ -59,10 +59,23 @@ never share storage, topics, or identities.
 Bots cannot reach operator endpoints, observer artifacts, or other players'
 credentials; each bot uses only its own participant identity. Control operations exist
 only in lane deployments: ordinary deployments answer them with 404 even for a
-control-scoped caller, and participant credentials receive 403. Broker grants follow
-the same boundary (`scripts/provision-kafka-simulation-acls.sh`): the lane observer
-reads only that lane's event topics, while bots and the operator hold no broker grants
-and use HTTP only.
+control-scoped caller, and participant credentials receive 403. That credential and
+scope boundary is enforced by the services. The broker boundary is structural: each
+lane project starts its own single-tenant broker, topics, and volumes, so cross-lane
+broker access is impossible by construction. The per-role grant table the lane
+observer is limited to — read-only consumption of that lane's `game.events` and
+`timeline.events` with an independent consumer group, and no broker grants for bots
+or the operator — is defined in `scripts/provision-kafka-simulation-acls.sh` and
+checked by `verify-simulation-deployment.sh` as a contract; it is enforced by the
+broker only on a hardened lane deployment running an authorizer, which the delivered
+plaintext lane topology does not start.
+
+The lane publishes no broker host ports, so the observer joins the lane network
+explicitly, for example as an additional service in the lane project or with:
+
+```bash
+docker run --network temporal-rift-sim-$SIMULATION_LANE_default <observer-image>
+```
 
 ## Readiness before gameplay
 

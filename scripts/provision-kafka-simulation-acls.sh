@@ -1,8 +1,19 @@
 #!/bin/bash
-# Grants the broker authorizations a simulation lane needs, on top of the service grants in
-# provision-kafka-acls.sh. Each lane runs its own broker inside its own task-owned Compose
-# project, so lane topics are isolated by construction; this script adds the one grant that is
-# lane-specific: the lane observer's read-only access to that lane's event topics.
+# Defines the broker authorizations a simulation lane requires, on top of the service grants in
+# provision-kafka-acls.sh. This is the lane's grant contract: it is checked by
+# verify-simulation-deployment.sh and applied by running this script against a lane broker
+# that enforces authorization (deny-by-default authorizer with per-identity credentials),
+# after the broker is healthy and before services or the observer attach:
+#
+#   /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list >/dev/null 2>&1
+#   bash scripts/provision-kafka-simulation-acls.sh kafka:9092 /path/to/admin.properties <lane>
+#
+# The delivered lane topology does not apply it at startup: each lane project starts its own
+# single-tenant plaintext broker, topics, and volumes, so cross-lane broker access is
+# impossible by construction and the lane network carries only lane members. Run this script
+# when the lane broker is hardened with an authorizer; until then the observer boundary
+# inside the lane network is the documented observer-only consumer role, not broker
+# enforcement.
 #
 # Roles and their broker access:
 #   game-service, timeline-service, read-service  Same topic and group grants as the
@@ -12,8 +23,8 @@
 #                  lane-owned consumer group. It never produces and never reads commands
 #                  or dead-letter topics.
 #   bots, operator  No broker grants at all: bots and the operator use only HTTP participant
-#                   and control APIs. The deny-by-default authorizer rejects any direct
-#                   broker attempt by those identities.
+#                   and control APIs. On a broker with the authorizer enabled, any direct
+#                   broker attempt by those identities is denied.
 #
 # Usage: provision-kafka-simulation-acls.sh <bootstrap-server> <command-config-file> [lane]
 # The lane names the observer principal (<lane>-observer) and its consumer group prefix.
