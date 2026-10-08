@@ -425,7 +425,10 @@ scoped to the task-owned `temporal-rift-sim-<lane>` project with lane/experiment
 labels, and only the lane's service ports are published on loopback. Bots use the normal
 authenticated participant APIs with deterministic per-seat identities; only the
 operator reaches the control operations, and a separate observer reads that lane's
-event topics with independent credentials.
+event topics with independent credentials after joining the lane network (the lane
+publishes no broker host ports; see `simulation/README.md`). Cross-lane broker
+access is impossible by construction: each lane project starts its own
+single-tenant plaintext broker, topics, and volumes.
 
 Each lane deployment writes an immutable manifest (`simulation/lanes/<lane>/`) recording
 service revisions, adopted contract versions, rules/content digests with retained bundle

@@ -39,6 +39,13 @@ services:
     labels:
       <<: *simulation-lane-labels
 
+  # The lane broker is single-tenant by construction: each lane project starts its own
+  # broker, topics, and volumes, so no other lane can reach them. It stays plaintext with
+  # no authorizer, like local development. The per-role grant table that a hardened lane
+  # broker would enforce (lane observer reads only that lane's event topics; bots and the
+  # operator hold no broker grants) is defined in
+  # scripts/provision-kafka-simulation-acls.sh and checked by
+  # scripts/verify-simulation-deployment.sh as a contract, not applied at startup.
   kafka:
     ports: !override []
     labels:
