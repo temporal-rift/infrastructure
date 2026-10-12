@@ -309,6 +309,37 @@ echo 'grant "$lane-observer" --operation Read --topic "*"' >> "$wildcard_root/ac
 SIMULATION_ACLS_SCRIPT="$wildcard_root/acls.sh" assert_failure_contains "must not contain wildcard" \
   run_validator "$wildcard_root"
 
+# The manifest attributes the bundle's effective digests, derived from the retained bytes.
+digests_root="$fixtures_dir/digests"
+setup_valid_deployment "$digests_root"
+# shellcheck source=lib/simulation-bundle.sh
+source "$script_dir/lib/simulation-bundle.sh"
+expected_rules="$(simulation_effective_rules_digest "$digests_root/config-repo")"
+expected_content="$(simulation_effective_content_digest "$digests_root/catalog.yml")"
+grep -q "\"effectiveRulesDigest\": \"$expected_rules\"" "$digests_root/manifest.json" \
+  || { echo "Manifest must record the effective rules digest." >&2; exit 1; }
+grep -q "\"effectiveContentDigest\": \"$expected_content\"" "$digests_root/manifest.json" \
+  || { echo "Manifest must record the effective content digest." >&2; exit 1; }
+
+# A tampered effective digest fails clearly.
+sed -i "s#\"effectiveRulesDigest\": \"$expected_rules\"#\"effectiveRulesDigest\": \"$(printf '0%.0s' {1..64})\"#" "$digests_root/manifest.json"
+assert_failure_contains "effectiveRulesDigest" \
+  run_validator "$digests_root"
+
+# A bundle prepared with a different threshold has different effective rules digests.
+bundle_a="$fixtures_dir/bundle-a"
+bundle_b="$fixtures_dir/bundle-b"
+bash "$script_dir/prepare-simulation-bundle.sh" --out "$bundle_a" --max-eras 2 --win-score-threshold 20 >/dev/null
+bash "$script_dir/prepare-simulation-bundle.sh" --out "$bundle_b" --max-eras 2 --win-score-threshold 22 >/dev/null
+[[ "$(simulation_effective_rules_digest "$bundle_a")" != "$(simulation_effective_rules_digest "$bundle_b")" ]] \
+  || { echo "Bundles with different thresholds must have different effective rules digests." >&2; exit 1; }
+grep -q 'win-score-threshold: 22' "$bundle_b/game-service.yml" \
+  || { echo "The candidate bundle must serve the edited threshold." >&2; exit 1; }
+if bash "$script_dir/prepare-simulation-bundle.sh" --out "$fixtures_dir/bundle-c" --max-eras 0 >/dev/null 2>&1; then
+  echo "A non-positive game length must be rejected." >&2
+  exit 1
+fi
+
 # Missing manifest fails clearly.
 missing_root="$fixtures_dir/missing"
 setup_valid_deployment "$missing_root"

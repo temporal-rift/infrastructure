@@ -108,3 +108,29 @@ remains after teardown.
 bash scripts/test-verify-simulation-deployment.sh
 bash scripts/test-check-simulation-readiness.sh
 ```
+
+## Observing lanes from a workbench
+
+`compose.simulation-observer.yml` lets one workbench reach several lanes. Layer it after `compose.simulation.yml`
+(`-f compose.yml -f compose.simulation.yml -f compose.simulation-observer.yml`) with `SIMULATION_OBSERVER_NETWORK`
+naming an existing shared network, `SIMULATION_ISSUER_JWKS_URI` naming the issuer's key set as reachable from the lane,
+and `SIMULATION_KAFKA_PORT` for loopback access to the lane broker from the host. The lane's game, timeline and read
+services join the shared network as `game.<lane>.lane`, `timeline.<lane>.lane` and `read.<lane>.lane`; the lane broker
+gets an observer listener that a small forwarder exposes as `kafka.<lane>.lane:9094`, so the broker's own service name
+never appears on the shared network (it would resolve to every lane's broker). Service images are tagged
+`temporal-rift/sim-*:${SIMULATION_IMAGE_TAG:-local}` so one build serves every lane.
+
+## Configuration bundles
+
+A lane serves exactly one bundle: the directory named by `SIMULATION_CONFIG_REPO` (default the shared config
+repository), mounted into that lane's config server. `scripts/prepare-simulation-bundle.sh --out DIR [--max-eras N]
+[--win-score-threshold T]` makes a variant, failing if a requested edit matches nothing. The manifest records
+`effectiveRulesDigest` (a digest over the served rules files' digests) and `effectiveContentDigest` (the event catalog's
+digest), and `verify-simulation-deployment.sh` recomputes both.
+
+## Recycling a used lane
+
+A lane accepts only one execution context for its lifetime. `scripts/recycle-simulation-lane.sh <lane-env-file>`
+removes that lane's own project (`down -v`) and starts it again from the images it has, answering only after the
+services are healthy; the env file holds the same `SIMULATION_*` variables the lane was provisioned with. Nothing outside
+the named project is touched.

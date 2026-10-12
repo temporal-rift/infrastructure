@@ -60,8 +60,12 @@ services:
   kafka-exporter:
     ports: !override []
 
+  # The lane serves its own frozen bundle: SIMULATION_CONFIG_REPO names the directory whose digests the
+  # lane manifest records. It defaults to the shared config repository.
   config-server:
     ports: !override []
+    volumes:
+      - "${SIMULATION_CONFIG_REPO:-./config-server/config-repo}:/config:ro"
 
   victorialogs:
     ports: !override []

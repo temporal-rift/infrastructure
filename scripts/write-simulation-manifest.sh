@@ -25,6 +25,8 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/simulation-bundle.sh
+source "$script_dir/lib/simulation-bundle.sh"
 repo_root="$(cd "$script_dir/.." && pwd)"
 workspace_root="$(cd "$repo_root/.." && pwd)"
 lane="${SIMULATION_LANE:?SIMULATION_LANE must be set to the lane name.}"
@@ -167,6 +169,8 @@ cp "$catalog_file" "$bundle_dir/future-events.yml"
   printf '    "read-service.yml": "%s",\n' "$(file_digest "$config_repo/read-service.yml")"
   printf '    "future-events.yml": "%s"\n' "$(file_digest "$catalog_file")"
   printf '  },\n'
+  printf '  "effectiveRulesDigest": "%s",\n' "$(simulation_effective_rules_digest "$config_repo")"
+  printf '  "effectiveContentDigest": "%s",\n' "$(simulation_effective_content_digest "$catalog_file")"
   printf '  "bundle": "retained alongside this manifest under bundle/"\n'
   printf '}\n'
 } > "$output"

@@ -23,6 +23,8 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/simulation-bundle.sh
+source "$script_dir/lib/simulation-bundle.sh"
 repo_root="$(cd "$script_dir/.." && pwd)"
 workspace_default="$(cd "$repo_root/.." && pwd)"
 
@@ -232,6 +234,11 @@ check_digest_matches "game-service.yml" "$config_repo/game-service.yml"
 check_digest_matches "timeline-service.yml" "$config_repo/timeline-service.yml"
 check_digest_matches "read-service.yml" "$config_repo/read-service.yml"
 check_digest_matches "future-events.yml" "$catalog_file"
+
+[[ "$(manifest_value "effectiveRulesDigest")" == "$(simulation_effective_rules_digest "$config_repo")" ]] \
+  || fail "manifest effectiveRulesDigest does not match the served rules in $config_repo: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
+[[ "$(manifest_value "effectiveContentDigest")" == "$(simulation_effective_content_digest "$catalog_file")" ]] \
+  || fail "manifest effectiveContentDigest does not match $catalog_file: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
 
 # The retained bundle carries the exact contents the digests attest, so a later
 # reader inspects what the lane actually served.
