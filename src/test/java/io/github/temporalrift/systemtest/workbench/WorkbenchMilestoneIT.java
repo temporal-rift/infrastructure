@@ -36,8 +36,8 @@ import io.github.temporalrift.systemtest.workbench.ReportMath.CaseRow;
 class WorkbenchMilestoneIT {
 
     private static final Pattern SHA256 = Pattern.compile("^[0-9a-f]{64}$");
-    private static final Duration MATRIX_TIMEOUT = minutes("workbenchE2e.matrixTimeoutMinutes", 360);
-    private static final Duration FIXTURE_TIMEOUT = minutes("workbenchE2e.fixtureTimeoutMinutes", 180);
+    private static final Duration MATRIX_TIMEOUT = minutes("workbenchE2e.matrixTimeoutMinutes", 200);
+    private static final Duration FIXTURE_TIMEOUT = minutes("workbenchE2e.fixtureTimeoutMinutes", 30);
     private static final int CASE_TIMEOUT_SECONDS = Integer.getInteger("workbenchE2e.caseTimeoutSeconds", 900);
     private static final int CANDIDATE_THRESHOLD = 22;
     private static final List<String> MULTI_SEEDS =
