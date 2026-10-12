@@ -1,0 +1,86 @@
+# Observation overlay for one isolated simulation lane, layered after compose.simulation.yml:
+#
+#   docker compose -p temporal-rift-sim-$SIMULATION_LANE \
+#     -f compose.yml -f compose.simulation.yml -f compose.simulation-observer.yml up -d --wait
+#
+# It lets one workbench reach several lanes without name collisions: the three lane services join the
+# shared workbench network under per-lane aliases, and the lane broker is reached through a dedicated
+# observer listener that only a per-lane forwarder exposes there. The broker itself never joins the shared
+# network, because its service name would then resolve to every lane's broker. The lane's issuer keys are
+# fetched explicitly, so the issuer URI may be one only browsers and tools on the host can reach, and
+# container logs stay on the lane's own container runtime instead of a shared syslog sink.
+#
+# Required environment (in addition to compose.simulation.yml's):
+#   SIMULATION_OBSERVER_NETWORK  Name of the existing shared workbench network.
+#   SIMULATION_ISSUER_JWKS_URI   Key set URL reachable from the lane over the shared network.
+#   SIMULATION_KAFKA_PORT        Loopback host port for harness access to this lane's broker.
+# Optional:
+#   SIMULATION_IMAGE_TAG         Tag shared by every lane's service images (default: local), so one build serves all lanes.
+
+networks:
+  workbench:
+    external: true
+    name: "${SIMULATION_OBSERVER_NETWORK:?SIMULATION_OBSERVER_NETWORK must name the shared workbench network}"
+
+x-observed-service: &observed-service
+  logging: !override
+    driver: json-file
+  environment:
+    SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: "${SIMULATION_ISSUER_JWKS_URI:?SIMULATION_ISSUER_JWKS_URI must be set to the issuer key set URL}"
+
+services:
+  config-server:
+    image: "temporal-rift/sim-config-server:${SIMULATION_IMAGE_TAG:-local}"
+
+  game-service:
+    <<: *observed-service
+    image: "temporal-rift/sim-game-service:${SIMULATION_IMAGE_TAG:-local}"
+    networks:
+      default: {}
+      workbench:
+        aliases:
+          - "game.${SIMULATION_LANE}.lane"
+
+  timeline-service:
+    <<: *observed-service
+    image: "temporal-rift/sim-timeline-service:${SIMULATION_IMAGE_TAG:-local}"
+    networks:
+      default: {}
+      workbench:
+        aliases:
+          - "timeline.${SIMULATION_LANE}.lane"
+
+  read-service:
+    <<: *observed-service
+    image: "temporal-rift/sim-read-service:${SIMULATION_IMAGE_TAG:-local}"
+    networks:
+      default: {}
+      workbench:
+        aliases:
+          - "read.${SIMULATION_LANE}.lane"
+
+  kafka:
+    ports:
+      - "127.0.0.1:${SIMULATION_KAFKA_PORT:?SIMULATION_KAFKA_PORT must be set to a free loopback port}:${SIMULATION_KAFKA_PORT}"
+    environment:
+      KAFKA_LISTENERS: "PLAINTEXT://:9092,PLAINTEXT_HOST://:${SIMULATION_KAFKA_PORT},CONTROLLER://:9093,OBSERVER://:9094"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:${SIMULATION_KAFKA_PORT},OBSERVER://kafka.${SIMULATION_LANE}.lane:9094"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,OBSERVER:PLAINTEXT"
+
+  # Forwards the shared network's observer address to the lane broker's observer listener (TCP only).
+  kafka-observer:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./simulation/kafka-observer.nginx.conf:/etc/nginx/nginx.conf:ro
+    labels:
+      com.temporal-rift.lane: "${SIMULATION_LANE}"
+      com.temporal-rift.experiment: "${SIMULATION_EXPERIMENT:?SIMULATION_EXPERIMENT must be set to the experiment name}"
+      com.temporal-rift.case: "${SIMULATION_CASE:?SIMULATION_CASE must be set to the case key}"
+    networks:
+      default: {}
+      workbench:
+        aliases:
+          - "kafka.${SIMULATION_LANE}.lane"
+    depends_on:
+      kafka:
+        condition: service_healthy
