@@ -395,5 +395,42 @@
                 </plugins>
             </build>
         </profile>
+
+        <profile>
+            <!-- Deployed simulation workbench milestone proof (infrastructure#108). Like browser-e2e it
+                 provisions nothing itself: scripts/provision-workbench-e2e.sh brings up the issuer, the
+                 isolated lanes and the workbench and writes target/workbench-e2e/deployment.json; this
+                 profile only runs the Failsafe ITs against that deployment. The workflow selects the suite
+                 with -Dit.test (core: WorkbenchMilestoneIT, AccessBoundariesIT, DesignerJourneyIT;
+                 recovery: WorkbenchRecoveryIT). Evidence is written under target/workbench-e2e-evidence. -->
+            <id>workbench-e2e</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                                <configuration>
+                                    <includes>
+                                        <include>**/workbench/*IT.java</include>
+                                    </includes>
+                                    <!-- Matrix, restart and recovery steps share lanes and run in a fixed order. -->
+                                    <properties>
+                                        <configurationParameters>
+                                            junit.jupiter.testclass.order.default = org.junit.jupiter.api.ClassOrderer$ClassName
+                                        </configurationParameters>
+                                    </properties>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 </project>

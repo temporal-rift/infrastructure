@@ -56,6 +56,12 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
+      - name: Validate the simulation lane scripts
+        run: |
+          bash scripts/test-verify-simulation-deployment.sh
+          bash scripts/test-check-simulation-readiness.sh
+          bash scripts/test-workbench-e2e-scripts.sh
+
       - name: Build and analyze
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
