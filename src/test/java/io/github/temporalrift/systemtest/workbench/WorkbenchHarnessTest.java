@@ -74,8 +74,9 @@ class WorkbenchHarnessTest {
     void lanesOfOneVariantMustServeOneBundle() {
         var mixed = DESCRIPTOR.replace(
                 "\"id\":\"wbe2e-2\",\"variant\":\"candidate\"", "\"id\":\"wbe2e-2\",\"variant\":\"baseline\"");
+        var deployment = Deployment.of(mixed);
 
-        assertThatThrownBy(() -> Deployment.of(mixed).variantLane("baseline"))
+        assertThatThrownBy(() -> deployment.variantLane("baseline"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("different bundles");
     }

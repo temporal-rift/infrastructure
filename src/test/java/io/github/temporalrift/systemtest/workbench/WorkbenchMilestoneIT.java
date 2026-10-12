@@ -84,7 +84,7 @@ class WorkbenchMilestoneIT {
     @Order(1)
     void thePreviewListsAllTwoHundredTwentyCoordinates() {
         policies = designer.policies();
-        evidence.record("policies", policies);
+        evidence.put("policies", policies);
         var manifest = Manifests.build(deployment, policies, matrixSpec());
 
         var preview = designer.post("/api/v1/experiment-previews?limit=500", manifest, null)
@@ -162,16 +162,16 @@ class WorkbenchMilestoneIT {
             table.add(accountFor(detail, row));
         }
         matrixRows = List.copyOf(rows);
-        evidence.record("matrixCases", table);
-        evidence.record(
+        evidence.put("matrixCases", table);
+        evidence.put(
                 "matrixCounts",
                 Map.of(
                         "requested", counts.path("requested").asInt(),
                         "succeeded", counts.path("succeeded").asInt(),
                         "failed", counts.path("failed").asInt(),
                         "cancelled", counts.path("cancelled").asInt()));
-        evidence.record("matrixRuntimeSeconds", matrixDuration.toSeconds());
-        evidence.record(
+        evidence.put("matrixRuntimeSeconds", matrixDuration.toSeconds());
+        evidence.put(
                 "matrixThroughputCasesPerHour",
                 matrixDuration.isZero() ? 0 : Math.round(220.0 * 3600 / matrixDuration.toSeconds() * 10) / 10.0);
 
@@ -231,7 +231,7 @@ class WorkbenchMilestoneIT {
                 }
             }
         }
-        evidence.record("winConditionGamesByVariant", decided);
+        evidence.put("winConditionGamesByVariant", decided);
         deployment.lanes().forEach(lane -> assertThat(lane.rulesDigest()).matches(SHA256));
         assertThat(deployment.variantLane(Manifests.BASELINE).rulesDigest())
                 .as("the two variants serve different rules bundles")
@@ -245,7 +245,7 @@ class WorkbenchMilestoneIT {
         var report = json.json();
         assertThat(report.path("runId").asString()).isEqualTo(matrixRunId);
         assertThat(report.path("analysisVersion").asString()).isNotBlank();
-        evidence.record(
+        evidence.put(
                 "analysis",
                 Map.of(
                         "analysisVersion", report.path("analysisVersion").asString(),
@@ -353,7 +353,7 @@ class WorkbenchMilestoneIT {
 
         var observer = designer.replay(matrixRunId, saved.caseId(), "OBSERVER", null);
         assertThat(observer).anyMatch(step -> "EVENT".equals(step.path("phase").asString()));
-        evidence.record(
+        evidence.put(
                 "replayLogicalTime",
                 Map.of(
                         "firstStep", observer.getFirst().path("logicalTime").asString(),
@@ -473,7 +473,7 @@ class WorkbenchMilestoneIT {
         var attempts = detail.path("attempts");
         var failure = attempts.path(attempts.size() - 1).path("failure");
         assertThat(failure.path("code").asString()).isNotBlank();
-        evidence.record(
+        evidence.put(
                 "injectedFault",
                 Map.of(
                         "caseKey", detail.path("caseKey").asString(),
@@ -510,7 +510,7 @@ class WorkbenchMilestoneIT {
         assertThat(excluded).as("the failed case's pair is listed, not hidden").isNotNull();
         assertThat(excluded.path("reason").asString()).isEqualTo("FAILED_COUNTERPART");
         assertThat(excluded.path("candidateState").asString()).isEqualTo("FAILED");
-        evidence.record("excludedPair", excluded);
+        evidence.put("excludedPair", excluded);
 
         var failedRow = CaseRow.of(failedCase);
         JsonNode cohort = null;
@@ -601,7 +601,7 @@ class WorkbenchMilestoneIT {
         var reproduction = designer.awaitReproduction(matrixRunId, saved.caseId(), key, FIXTURE_TIMEOUT);
         assertThat(reproduction.path("state").asString()).isEqualTo("MATCH");
         assertThat(reproduction.path("firstDivergence").isNull()).isTrue();
-        evidence.record(
+        evidence.put(
                 "reproduction",
                 Map.of(
                         "caseKey", before.path("caseKey").asString(),
@@ -836,7 +836,7 @@ class WorkbenchMilestoneIT {
                         .asString())
                 .as("the undisturbed replay of the disturbed game")
                 .isEqualTo("MATCH");
-        evidence.record("redelivery", Map.of("recordsRedelivered", redelivered, "cases", summaries.size()));
+        evidence.put("redelivery", Map.of("recordsRedelivered", redelivered, "cases", summaries.size()));
     }
 
     private Manifests.Spec matrixSpec() {

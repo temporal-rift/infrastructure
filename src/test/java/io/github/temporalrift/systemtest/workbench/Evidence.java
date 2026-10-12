@@ -30,7 +30,7 @@ final class Evidence {
     }
 
     /** Records a named section: any value Jackson can serialize. */
-    void record(String section, Object value) {
+    void put(String section, Object value) {
         sections.put(section, value);
     }
 

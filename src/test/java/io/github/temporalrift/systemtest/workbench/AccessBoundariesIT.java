@@ -49,7 +49,7 @@ class AccessBoundariesIT {
                         .isEqualTo(404);
             }
         }
-        evidence.record("ordinaryDeploymentControlStatus", 404);
+        evidence.put("ordinaryDeploymentControlStatus", 404);
     }
 
     @Test

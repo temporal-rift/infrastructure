@@ -75,7 +75,7 @@ final class Workbench {
     static boolean orFalse(java.util.function.BooleanSupplier poll) {
         try {
             return poll.getAsBoolean();
-        } catch (RuntimeException | AssertionError failure) {
+        } catch (RuntimeException | AssertionError _) {
             return false;
         }
     }
