@@ -34,7 +34,7 @@ class DesignerJourneyIT {
 
     private static final String DRAFT_KEY = "workbench.experiment-draft.v1";
     private static final Duration UI_WAIT = Duration.ofSeconds(60);
-    private static final Duration RUN_WAIT = Duration.ofMinutes(Integer.getInteger("workbenchE2e.journeyMinutes", 90));
+    private static final Duration RUN_WAIT = Duration.ofMinutes(Integer.getInteger("workbenchE2e.journeyMinutes", 30));
 
     private static Playwright playwright;
     private static Browser browser;

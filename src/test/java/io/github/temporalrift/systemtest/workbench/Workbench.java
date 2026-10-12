@@ -120,9 +120,8 @@ final class Workbench {
                     .requireStatus(200)
                     .json();
             page.path("steps").forEach(steps::add);
-            after = page.path("nextStep").isNull()
-                    ? null
-                    : page.path("nextStep").asInt();
+            var next = page.path("nextStep");
+            after = next.isNumber() ? next.asInt() : null;
         } while (after != null);
         return steps;
     }

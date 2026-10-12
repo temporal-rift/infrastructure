@@ -30,7 +30,7 @@ class WorkbenchRecoveryIT {
     private static final int INTERRUPT_AFTER = Integer.getInteger("workbenchE2e.recovery.interruptAfter", 400);
     private static final int RESUME_PROGRESS = Integer.getInteger("workbenchE2e.recovery.resumeProgress", 10);
     private static final Duration TIMEOUT =
-            Duration.ofMinutes(Integer.getInteger("workbenchE2e.recovery.timeoutMinutes", 330));
+            Duration.ofMinutes(Integer.getInteger("workbenchE2e.recovery.timeoutMinutes", 150));
 
     private final Deployment deployment = Deployment.load();
     private final Issuer issuer = new Issuer(deployment.issuer());

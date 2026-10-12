@@ -225,6 +225,10 @@ jobs:
         run: |
           mvn --batch-mode verify -Pworkbench-e2e \
             -Dit.test='${{ matrix.tests }}' \
+            -DworkbenchE2e.matrixTimeoutMinutes=200 \
+            -DworkbenchE2e.fixtureTimeoutMinutes=30 \
+            -DworkbenchE2e.journeyMinutes=30 \
+            -DworkbenchE2e.recovery.timeoutMinutes=150 \
             -DworkbenchE2e.recovery.cases="$RECOVERY_CASES" \
             -DworkbenchE2e.recovery.interruptAfter="$RECOVERY_INTERRUPT_AFTER"
 
