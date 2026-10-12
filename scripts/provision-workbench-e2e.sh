@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# Provisions the deployed simulation workbench E2E (infrastructure#108): the issuer and shared network, N
+# isolated simulation lanes split between two configuration bundles, an ordinary deployment, the lane
+# recycler and the workbench itself. Writes the non-secret deployment descriptor the test harness reads
+# (target/workbench-e2e/deployment.json) and the workbench's runtime lane configuration with the lane
+# credentials (target/workbench-e2e/lanes.yml, never retained as evidence).
+#
+# Usage: bash scripts/provision-workbench-e2e.sh
+#
+# Requires the game-service, timeline-service, read-service and simulation-workbench checkouts as siblings
+# of this repository, and MAVEN_SETTINGS (Maven settings with a `github` server entry) for the image builds.
+#
+# Optional environment:
+#   WORKBENCH_E2E_LANES     Number of lanes, even and at least 2 (default 4). Lanes 1..N/2 serve the
+#                           baseline bundle, the rest the candidate bundle.
+#   WORKBENCH_E2E_MAX_ERAS  Game length served by both bundles (default 2).
+#   WORKBENCH_E2E_RUN_ID    Attribution recorded on every lane (default local).
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+workspace="$(cd "$repo_root/.." && pwd)"
+# shellcheck source=lib/workbench-e2e.sh
+source "$script_dir/lib/workbench-e2e.sh"
+
+lanes="${WORKBENCH_E2E_LANES:-4}"
+max_eras="${WORKBENCH_E2E_MAX_ERAS:-2}"
+run_id="${WORKBENCH_E2E_RUN_ID:-local}"
+out="$repo_root/target/workbench-e2e"
+
+fail() { echo "Workbench E2E provisioning failed: $1" >&2; exit 1; }
+
+[[ "$lanes" =~ ^[0-9]+$ && "$lanes" -ge 2 && $((lanes % 2)) -eq 0 ]] \
+  || fail "WORKBENCH_E2E_LANES must be an even number of at least 2, got '$lanes'."
+for dir in game-service timeline-service read-service simulation-workbench; do
+  [[ -d "$workspace/$dir" ]] || fail "sibling checkout not found: $workspace/$dir."
+done
+[[ -n "${MAVEN_SETTINGS:-}" ]] || fail "MAVEN_SETTINGS must hold the Maven settings used by the image builds."
+
+export WORKBENCH_E2E_REPO="$repo_root"
+export WORKBENCH_E2E_WORKSPACE="$workspace"
+export SIMULATION_OBSERVER_NETWORK="$workbench_e2e_network"
+
+cd "$repo_root"
+rm -rf "$out"
+mkdir -p "$out/lanes" "$out/bundles"
+
+echo "== Preparing configuration bundles"
+bash scripts/prepare-simulation-bundle.sh --out "$out/bundles/baseline" --max-eras "$max_eras" --win-score-threshold 20
+bash scripts/prepare-simulation-bundle.sh --out "$out/bundles/candidate" --max-eras "$max_eras" --win-score-threshold 22
+
+stack=(docker compose -p "$workbench_e2e_project" -f compose.workbench-e2e.yml)
+
+echo "== Starting the issuer"
+"${stack[@]}" up -d issuer
+for _ in $(seq 1 60); do
+  curl --fail --silent --max-time 5 "$workbench_e2e_issuer_url/.well-known/openid-configuration" > /dev/null && break
+  sleep 1
+done
+curl --fail --silent --max-time 5 "$workbench_e2e_issuer_url/.well-known/openid-configuration" > /dev/null \
+  || fail "the issuer is not reachable at $workbench_e2e_issuer_url."
+
+operator_token="$(workbench_e2e_mint workbench-operator simulation:control)"
+[[ -n "$operator_token" ]] || fail "the issuer returned no operator token."
+
+lane_env() { printf '%s/lanes/%s.env' "$out" "$1"; }
+
+digest_of() {
+  sed -n "s/.*\"$2\": \"\([0-9a-f]*\)\".*/\1/p" "$repo_root/simulation/lanes/$1/manifest.json"
+}
+
+echo "== Writing lane manifests"
+for k in $(seq 1 "$lanes"); do
+  lane="${workbench_e2e_lane_prefix}$k"
+  variant=baseline
+  [[ "$k" -gt $((lanes / 2)) ]] && variant=candidate
+  cat > "$(lane_env "$lane")" <<ENV
+SIMULATION_LANE=$lane
+SIMULATION_EXPERIMENT=workbench-e2e-$run_id
+SIMULATION_CASE=workbench-e2e
+JWT_ISSUER_URI=$workbench_e2e_issuer_url
+SIMULATION_ISSUER_JWKS_URI=$workbench_e2e_jwks_url
+SIMULATION_OBSERVER_NETWORK=$workbench_e2e_network
+SIMULATION_GAME_PORT=$((18100 + 10 * k))
+SIMULATION_TIMELINE_PORT=$((18101 + 10 * k))
+SIMULATION_READ_PORT=$((18102 + 10 * k))
+SIMULATION_KAFKA_PORT=$((18103 + 10 * k))
+SIMULATION_CONFIG_REPO=$out/bundles/$variant
+SIMULATION_IMAGE_TAG=wbe2e
+SIMULATION_VARIANT=$variant
+ENV
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$(lane_env "$lane")"
+    set +a
+    bash scripts/write-simulation-manifest.sh > /dev/null
+    SIMULATION_SKIP_ISSUER_REACHABILITY=1 bash scripts/verify-simulation-deployment.sh
+  )
+done
+
+lane_compose() {
+  local lane="$1"
+  shift
+  (
+    set -a
+    # shellcheck disable=SC1090
+    source "$(lane_env "$lane")"
+    set +a
+    docker compose -p "$(workbench_e2e_lane_project "$lane")" "${workbench_e2e_lane_files[@]}" "$@"
+  )
+}
+
+echo "== Building the service images once for every lane"
+lane_compose "${workbench_e2e_lane_prefix}1" build game-service timeline-service read-service config-server
+
+echo "== Starting $lanes lanes"
+pids=()
+for k in $(seq 1 "$lanes"); do
+  lane_compose "${workbench_e2e_lane_prefix}$k" up -d --wait --wait-timeout 420 \
+    game-service timeline-service read-service kafka-observer &
+  pids+=($!)
+done
+for pid in "${pids[@]}"; do
+  wait "$pid" || fail "a lane did not become healthy."
+done
+
+echo "== Starting the ordinary deployment"
+SIMULATION_IMAGE_TAG=wbe2e docker compose -p "$workbench_e2e_ordinary_project" \
+  -f compose.yml -f compose.workbench-e2e-ordinary.yml \
+  up -d --wait --wait-timeout 420 game-service timeline-service
+
+echo "== Writing the workbench lane configuration"
+{
+  printf 'workbench:\n  execution:\n    worker-enabled: true\n    max-attempts-per-case: 1\n    lanes:\n'
+  for k in $(seq 1 "$lanes"); do
+    lane="${workbench_e2e_lane_prefix}$k"
+    printf '      - id: %s\n' "$lane"
+    printf '        game-service-url: http://game.%s.lane:8080\n' "$lane"
+    printf '        timeline-service-url: http://timeline.%s.lane:8080\n' "$lane"
+    printf '        read-service-url: http://read.%s.lane:8080\n' "$lane"
+    printf '        operator-token: %s\n' "$operator_token"
+    printf '        kafka-bootstrap-servers: kafka.%s.lane:9094\n' "$lane"
+    printf '        rules-digest: %s\n' "$(digest_of "$lane" effectiveRulesDigest)"
+    printf '        content-digest: %s\n' "$(digest_of "$lane" effectiveContentDigest)"
+    printf '        reset-url: http://lane-recycler:8080/lanes/%s/reset\n' "$lane"
+    printf '        bots:\n'
+    for seat in 0 1 2 3 4; do
+      bot="$(workbench_e2e_bot_id "$lane" "$seat")"
+      printf '          - player-id: %s\n            token: %s\n' "$bot" "$(workbench_e2e_mint "$bot")"
+    done
+  done
+} > "$out/lanes.yml"
+
+echo "== Writing the deployment descriptor"
+{
+  printf '{\n  "runId": "%s",\n  "issuer": "%s",\n  "workbenchUrl": "%s",\n' "$run_id" "$workbench_e2e_issuer_url" "$workbench_e2e_workbench_url"
+  printf '  "workbenchProject": "%s",\n' "$workbench_e2e_project"
+  printf '  "ordinary": {"project": "%s", "gameUrl": "http://127.0.0.1:18300", "timelineUrl": "http://127.0.0.1:18301"},\n' "$workbench_e2e_ordinary_project"
+  printf '  "maxEras": %s,\n' "$max_eras"
+  printf '  "services": {\n'
+  printf '    "gameService": {"imageDigest": "%s", "sourceRevision": "%s"},\n' \
+    "$(docker image inspect temporal-rift/sim-game-service:wbe2e --format '{{.Id}}')" "$(git -C "$workspace/game-service" rev-parse HEAD)"
+  printf '    "timelineService": {"imageDigest": "%s", "sourceRevision": "%s"},\n' \
+    "$(docker image inspect temporal-rift/sim-timeline-service:wbe2e --format '{{.Id}}')" "$(git -C "$workspace/timeline-service" rev-parse HEAD)"
+  printf '    "readService": {"imageDigest": "%s", "sourceRevision": "%s"}\n' \
+    "$(docker image inspect temporal-rift/sim-read-service:wbe2e --format '{{.Id}}')" "$(git -C "$workspace/read-service" rev-parse HEAD)"
+  printf '  },\n'
+  # The lane manifest already attributes the exact contract pins the services were built with.
+  printf '  %s,\n' "$(awk '/"contracts": \{/ {capture = 1} capture {print} capture && /^  \}/ {exit}' \
+    "$repo_root/simulation/lanes/${workbench_e2e_lane_prefix}1/manifest.json" | tr -d '\n' | sed 's/,[[:space:]]*$//')"
+  printf '  "lanes": [\n'
+  for k in $(seq 1 "$lanes"); do
+    lane="${workbench_e2e_lane_prefix}$k"
+    printf '    {"id": "%s", "variant": "%s", "project": "%s", ' "$lane" \
+      "$([[ "$k" -gt $((lanes / 2)) ]] && echo candidate || echo baseline)" "$(workbench_e2e_lane_project "$lane")"
+    printf '"gameUrl": "http://127.0.0.1:%s", "timelineUrl": "http://127.0.0.1:%s", "readUrl": "http://127.0.0.1:%s", "kafkaBootstrap": "127.0.0.1:%s", ' \
+      "$((18100 + 10 * k))" "$((18101 + 10 * k))" "$((18102 + 10 * k))" "$((18103 + 10 * k))"
+    printf '"manifest": "simulation/lanes/%s/manifest.json", "rulesDigest": "%s", "contentDigest": "%s", "bots": [' \
+      "$lane" "$(digest_of "$lane" effectiveRulesDigest)" "$(digest_of "$lane" effectiveContentDigest)"
+    for seat in 0 1 2 3 4; do
+      printf '"%s"' "$(workbench_e2e_bot_id "$lane" "$seat")"
+      [[ "$seat" -lt 4 ]] && printf ', '
+    done
+    printf ']}'
+    [[ "$k" -lt "$lanes" ]] && printf ','
+    printf '\n'
+  done
+  printf '  ]\n}\n'
+} > "$out/deployment.json"
+
+echo "== Starting the recycler and the workbench"
+"${stack[@]}" up -d --build --wait --wait-timeout 600 lane-recycler workbench
+
+echo "Workbench E2E deployment ready: $out/deployment.json"

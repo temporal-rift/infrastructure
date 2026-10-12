@@ -1,0 +1,286 @@
+name: Workbench E2E
+
+# Runs the deployed simulation workbench milestone proof (infrastructure#108): the real workbench and designer UI
+# driving isolated game/timeline/read lanes behind a scoped OIDC issuer. Two independent jobs, each on its own
+# runner and its own deployment:
+#   core      seed-42 matrix, multi-seed fixture, reproduction after restart, access boundaries, redelivery,
+#             and the designer UI journey
+#   recovery  a large run killed after N successes, resumed and cancelled
+#
+# Not triggered by pull requests or pushes: epic-e2e.yml calls it when an epic closes, and it can be dispatched
+# by hand. Every default branch is checked out side by side, mirroring the developer workspace layout.
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: >-
+          Repository name of the service under test (game-service, timeline-service, read-service or
+          simulation-workbench). Omit to run every repository at its default branch.
+        required: false
+        type: string
+        default: ''
+      ref:
+        description: Ref of the service under test. Ignored unless `service` is set.
+        required: false
+        type: string
+        default: ''
+  workflow_dispatch:
+    inputs:
+      service:
+        description: Service under test. Leave as `all` to run every repository at its default branch.
+        required: false
+        type: choice
+        default: all
+        options:
+          - all
+          - game-service
+          - timeline-service
+          - read-service
+          - simulation-workbench
+      ref:
+        description: Ref of the service under test. Required unless `service` is `all`.
+        required: false
+        type: string
+        default: ''
+      lanes:
+        description: Number of isolated lanes (even, at least 2).
+        required: false
+        type: string
+        default: '4'
+      recovery-cases:
+        description: Cases in the recovery run (a multiple of 100).
+        required: false
+        type: string
+        default: '1000'
+      recovery-interrupt-after:
+        description: Successes after which the recovery run is killed.
+        required: false
+        type: string
+        default: '400'
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  # The deployment holds fixed host ports and Compose project names, so one proof at a time per ref.
+  group: workbench-e2e-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workbench-e2e:
+    name: workbench-e2e (${{ matrix.suite }})
+    runs-on: ubuntu-latest
+    # GitHub's hard limit for a hosted job is 360 minutes.
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: core
+            tests: WorkbenchMilestoneIT,AccessBoundariesIT,DesignerJourneyIT
+          - suite: recovery
+            tests: WorkbenchRecoveryIT
+
+    env:
+      WORKBENCH_E2E_LANES: ${{ inputs.lanes || '4' }}
+      WORKBENCH_E2E_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.suite }}
+      RECOVERY_CASES: ${{ inputs.recovery-cases || '1000' }}
+      RECOVERY_INTERRUPT_AFTER: ${{ inputs.recovery-interrupt-after || '400' }}
+
+    steps:
+      - name: Validate service/ref inputs
+        if: (inputs.service != '' && inputs.service != 'all' && inputs.ref == '') || ((inputs.service == '' || inputs.service == 'all') && inputs.ref != '')
+        run: |
+          echo "::error::service='${INPUT_SERVICE}' and ref='${INPUT_REF}' must be given together -- otherwise every repository silently runs at 'main' and the ref under test is never built."
+          exit 1
+        env:
+          INPUT_SERVICE: ${{ inputs.service }}
+          INPUT_REF: ${{ inputs.ref }}
+
+      - name: Check out infrastructure
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/infrastructure
+          ref: ${{ github.repository == 'temporal-rift/infrastructure' && github.sha || 'main' }}
+          path: infrastructure
+          persist-credentials: false
+
+      - name: Validate the simulation lane scripts
+        working-directory: infrastructure
+        run: |
+          bash scripts/test-verify-simulation-deployment.sh
+          bash scripts/test-check-simulation-readiness.sh
+          bash scripts/test-workbench-e2e-scripts.sh
+
+      - name: Check out game-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/game-service
+          ref: ${{ inputs.service == 'game-service' && inputs.ref || 'main' }}
+          path: game-service
+          persist-credentials: false
+
+      - name: Check out timeline-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/timeline-service
+          ref: ${{ inputs.service == 'timeline-service' && inputs.ref || 'main' }}
+          path: timeline-service
+          persist-credentials: false
+
+      - name: Check out read-service
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/read-service
+          ref: ${{ inputs.service == 'read-service' && inputs.ref || 'main' }}
+          path: read-service
+          persist-credentials: false
+
+      - name: Check out simulation-workbench
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: temporal-rift/simulation-workbench
+          ref: ${{ inputs.service == 'simulation-workbench' && inputs.ref || 'main' }}
+          path: simulation-workbench
+          persist-credentials: false
+
+      - name: Report sources under test
+        run: |
+          echo "Service under test: ${INPUT_SERVICE:-<none — all repositories at default branch>}"
+          for repo in infrastructure game-service timeline-service read-service simulation-workbench; do
+            echo "$repo $(git -C "$repo" rev-parse --short HEAD)"
+          done
+        env:
+          INPUT_SERVICE: ${{ inputs.service }}
+
+      # The lane overlays use the `!override` and `!reset` tags, which need Compose v2.24.4+.
+      - name: Verify Docker Compose supports the lane overlays
+        run: |
+          version="$(docker compose version --short)"
+          echo "docker compose $version"
+          required=2.24.4
+          if [ "$(printf '%s\n%s\n' "$required" "$version" | sort -V | head -n1)" != "$required" ]; then
+            echo "::error::docker compose $version is older than the required $required"
+            exit 1
+          fi
+
+      # Maven-built images resolve shared artifacts from GitHub Packages, which needs a token even for public packages.
+      - name: Provide Maven settings to image builds
+        env:
+          PACKAGES_USER: ${{ github.actor }}
+          PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          {
+            echo 'MAVEN_SETTINGS<<MAVEN_SETTINGS_EOF'
+            printf '<settings><servers><server><id>github</id><username>%s</username><password>%s</password></server></servers></settings>\n' "$PACKAGES_USER" "$PACKAGES_TOKEN"
+            echo 'MAVEN_SETTINGS_EOF'
+          } >> "$GITHUB_ENV"
+
+      - name: Setup Maven Action
+        uses: s4u/setup-maven-action@ba34de01b7f4ba2ab8e2860df8993a29f4477056 # v1.20.0
+        with:
+          java-version: 26
+          java-distribution: temurin
+          maven-version: 4.0.0-rc-7
+          settings-githubServer: false
+          checkout-enabled: false
+          settings-servers: |
+            [
+              {
+                "id": "github",
+                "username": "${{ github.actor }}",
+                "password": "${{ secrets.GITHUB_TOKEN }}"
+              }
+            ]
+
+      - name: Cache Maven packages
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-m2-workbench-e2e-${{ hashFiles('*/pom.xml', '*/*/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2-workbench-e2e-
+
+      - name: Install the browser for the designer journey
+        if: matrix.suite == 'core'
+        working-directory: infrastructure
+        run: mvn --batch-mode test-compile exec:java -Dexec.mainClass=com.microsoft.playwright.CLI -Dexec.classpathScope=test -Dexec.args="install --with-deps chromium"
+
+      - name: Start resource monitor
+        run: |
+          (while true; do
+            echo "#$(date +%s)" >> resource-samples.txt
+            docker stats --no-stream --format '{{.Name}},{{.CPUPerc}},{{.MemUsage}}' >> resource-samples.txt 2>/dev/null
+            sleep 15
+          done) &
+          echo $! > monitor.pid
+
+      - name: Provision the deployment
+        working-directory: infrastructure
+        run: bash scripts/provision-workbench-e2e.sh
+
+      - name: Run the ${{ matrix.suite }} suite
+        working-directory: infrastructure
+        run: |
+          mvn --batch-mode verify -Pworkbench-e2e \
+            -Dit.test='${{ matrix.tests }}' \
+            -DworkbenchE2e.recovery.cases="$RECOVERY_CASES" \
+            -DworkbenchE2e.recovery.interruptAfter="$RECOVERY_INTERRUPT_AFTER"
+
+      - name: Stop resource monitor
+        if: always()
+        run: |
+          [ -f monitor.pid ] && kill "$(cat monitor.pid)" 2>/dev/null || true
+
+      - name: Summarize measurements
+        if: always()
+        working-directory: infrastructure
+        run: |
+          {
+            bash scripts/summarize-workbench-e2e.sh target/workbench-e2e-evidence ../resource-samples.txt
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect diagnostics
+        if: failure()
+        working-directory: infrastructure
+        run: bash scripts/capture-workbench-e2e-diagnostics.sh ../workbench-e2e-diagnostics
+
+      - name: Upload versioned evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workbench-e2e-evidence-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            infrastructure/target/workbench-e2e-evidence
+            infrastructure/simulation/lanes/*/manifest.json
+            infrastructure/target/workbench-e2e/deployment.json
+            resource-samples.txt
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workbench-e2e-diagnostics-${{ matrix.suite }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: workbench-e2e-diagnostics
+          retention-days: 14
+          if-no-files-found: warn
+
+      # Scoped to the projects this deployment named, so it removes exactly what this run created.
+      - name: Tear down the deployment
+        if: always()
+        working-directory: infrastructure
+        run: bash scripts/cleanup-workbench-e2e.sh
+
+      - name: Confirm cleanup spared the protected lookalike
+        if: success() && matrix.suite == 'core'
+        run: |
+          if docker ps -a -q --filter name=wbe2e-protected-decoy | grep -q .; then
+            echo "The protected lookalike survived the cleanup."
+            docker rm -f wbe2e-protected-decoy
+          else
+            echo "::error::the cleanup removed a resource it does not own"
+            exit 1
+          fi

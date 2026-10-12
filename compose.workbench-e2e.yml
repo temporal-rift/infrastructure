@@ -1,0 +1,105 @@
+name: temporal-rift-workbench-e2e
+
+# Deployed simulation workbench E2E (infrastructure#108): the workbench product, its database, the OIDC
+# issuer and the lane recycler on one named network that the isolated simulation lanes also join (see
+# compose.simulation-observer.yml). The lanes are separate Compose projects started by
+# scripts/provision-workbench-e2e.sh, which drives this file in order: issuer first (so the network exists),
+# then the lanes, then everything else. Nothing here is a local development default.
+#
+# Required environment: WORKBENCH_E2E_REPO (absolute path of this checkout, identical on host and in the
+# recycler), MAVEN_SETTINGS (Maven settings secret for the workbench image build).
+
+networks:
+  default:
+    name: temporal-rift-workbench-e2e-net
+
+x-owner-label: &owner-label
+  com.temporal-rift.owner: workbench-e2e
+
+services:
+  # Interactive login for the designer UI (the username picks the scopes) and client-credentials tokens for
+  # bots, the operator and API callers. Its issuer is the URI browsers and tools on the host use; containers
+  # fetch its keys over the network alias `issuer`.
+  issuer:
+    image: ghcr.io/navikt/mock-oauth2-server:6.0.3
+    labels: *owner-label
+    ports:
+      - "127.0.0.1:19000:8080"
+    environment:
+      JSON_CONFIG: >-
+        {"interactiveLogin":true,
+        "tokenCallbacks":[{"issuerId":"default","tokenExpiry":604800,"requestMappings":[
+        {"requestParam":"scope","match":"simulation:control","claims":{"scope":"simulation:control"}},
+        {"requestParam":"scope","match":"simulation:read simulation:write simulation:observe","claims":{"scope":"simulation:read simulation:write simulation:observe"}},
+        {"requestParam":"scope","match":"simulation:read simulation:write","claims":{"scope":"simulation:read simulation:write"}},
+        {"requestParam":"subject","match":"designer","claims":{"scope":"simulation:read simulation:write simulation:observe","preferred_username":"designer"}},
+        {"requestParam":"subject","match":"analyst","claims":{"scope":"simulation:read simulation:write","preferred_username":"analyst"}},
+        {"requestParam":"subject","match":"reader","claims":{"scope":"simulation:read","preferred_username":"reader"}}]}]}
+
+  workbench-postgres:
+    image: postgres:16-alpine
+    labels: *owner-label
+    environment:
+      POSTGRES_DB: workbench
+      POSTGRES_USER: workbench
+      POSTGRES_PASSWORD: workbench
+    # Durable evidence lives here and is never reset between cases; fsync stays on so an abruptly killed
+    # workbench container is the only failure the recovery proof injects.
+    volumes:
+      - workbench-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U workbench -d workbench"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Serves POST /lanes/{lane}/reset for the workbench's per-lane reset hook.
+  lane-recycler:
+    build:
+      context: ./simulation/recycler
+    image: temporal-rift/sim-lane-recycler:local
+    labels: *owner-label
+    environment:
+      LANE_RECYCLER_REPO: "${WORKBENCH_E2E_REPO:?WORKBENCH_E2E_REPO must be the absolute path of this checkout}"
+    working_dir: "${WORKBENCH_E2E_REPO}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The sibling checkouts too: the lane files' build contexts must exist where Compose parses them.
+      - "${WORKBENCH_E2E_WORKSPACE:?WORKBENCH_E2E_WORKSPACE must be the parent directory of this checkout}:${WORKBENCH_E2E_WORKSPACE}:ro"
+
+  workbench:
+    build:
+      context: ../simulation-workbench
+      secrets:
+        - maven_settings
+    image: temporal-rift/simulation-workbench:e2e
+    labels: *owner-label
+    ports:
+      - "127.0.0.1:18200:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_HOST: workbench-postgres
+      SPRING_DATASOURCE_NAME: workbench
+      SPRING_DATASOURCE_USERNAME: workbench
+      SPRING_DATASOURCE_PASSWORD: workbench
+      KAFKA_BOOTSTRAP_SERVERS: "kafka.wbe2e-1.lane:9094"
+      KAFKA_SECURITY_PROTOCOL: PLAINTEXT
+      JWT_ISSUER_URI: http://localhost:19000/default
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://issuer:8080/default/jwks
+      SPRING_CONFIG_IMPORT: "optional:file:/etc/workbench/lanes.yml"
+    volumes:
+      - ./target/workbench-e2e/lanes.yml:/etc/workbench/lanes.yml:ro
+    depends_on:
+      workbench-postgres:
+        condition: service_healthy
+      issuer:
+        condition: service_started
+      lane-recycler:
+        condition: service_started
+
+volumes:
+  workbench-data:
+
+secrets:
+  maven_settings:
+    environment: MAVEN_SETTINGS
