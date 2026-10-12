@@ -151,8 +151,8 @@ class DesignerJourneyIT {
         assertThat(page.getByText(Pattern.compile("matched the recording exactly")))
                 .isVisible(runWait());
 
-        evidence.record("journeyRunId", runId.group(1));
-        evidence.record("journeyOutcome", "MATCH");
+        evidence.put("journeyRunId", runId.group(1));
+        evidence.put("journeyOutcome", "MATCH");
     }
 
     private void startWithDraft(JsonNode manifest) {

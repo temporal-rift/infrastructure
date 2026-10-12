@@ -85,7 +85,7 @@ class WorkbenchRecoveryIT {
                 TIMEOUT,
                 INTERRUPT_AFTER + " cases to succeed");
         Docker.killService(deployment.stackProject(), "workbench");
-        evidence.record(
+        evidence.put(
                 "interruptedAfterSeconds",
                 Duration.between(started, Instant.now()).toSeconds());
     }
@@ -116,7 +116,7 @@ class WorkbenchRecoveryIT {
         }
         assertThat(kept).hasSize(succeeded);
         retained = Map.copyOf(kept);
-        evidence.record("retainedAtInterruption", succeeded);
+        evidence.put("retainedAtInterruption", succeeded);
         assertThat(interrupted.path("counts").path("running").asInt())
                 .as("no case is left running by an interrupted run")
                 .isZero();
@@ -171,9 +171,9 @@ class WorkbenchRecoveryIT {
                 .isEqualTo("MANIFEST_MISMATCH");
 
         var seconds = Duration.between(started, Instant.now()).toSeconds();
-        evidence.record("finalCounts", counts);
-        evidence.record("runtimeSeconds", seconds);
-        evidence.record(
+        evidence.put("finalCounts", counts);
+        evidence.put("runtimeSeconds", seconds);
+        evidence.put(
                 "throughputSuccessesPerHour",
                 Math.round(counts.path("succeeded").asInt() * 3600.0 / seconds * 10) / 10.0);
     }

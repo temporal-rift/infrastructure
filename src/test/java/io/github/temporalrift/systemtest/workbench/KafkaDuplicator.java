@@ -54,12 +54,12 @@ final class KafkaDuplicator implements AutoCloseable {
                 var producer = new KafkaProducer<byte[], byte[]>(producerProperties)) {
             consumer.subscribe(TOPICS);
             while (running.get()) {
-                for (var record : consumer.poll(Duration.ofMillis(250))) {
-                    if (record.headers().lastHeader(MARKER) != null) {
+                for (var event : consumer.poll(Duration.ofMillis(250))) {
+                    if (event.headers().lastHeader(MARKER) != null) {
                         continue;
                     }
                     var copy = new ProducerRecord<>(
-                            record.topic(), record.partition(), record.key(), record.value(), record.headers());
+                            event.topic(), event.partition(), event.key(), event.value(), event.headers());
                     copy.headers().add(MARKER, new byte[] {1});
                     producer.send(copy);
                     redelivered.incrementAndGet();
