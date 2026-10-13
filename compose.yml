@@ -161,7 +161,8 @@ services:
       JSON_CONFIG: >-
         {"interactiveLogin":true,
         "tokenCallbacks":[{"issuerId":"default","requestMappings":[
-        {"requestParam":"subject","match":".*","claims":{"preferred_username":"$${subject}"}}]}]}
+        {"requestParam":"subject","match":".*","claims":{"preferred_username":"$${subject}",
+        "scope":"simulation:read simulation:write simulation:observe"}}]}]}
     ports:
       - "127.0.0.1:9000:8080"
 

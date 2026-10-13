@@ -23,7 +23,8 @@ partitions before the services start. Each service waits for a healthy Zipkin se
 spans are retained.
 
 The stack also runs a local interactive OIDC test issuer at `http://localhost:9000/default` that accepts any username
-and issues it as both the token subject and `preferred_username`, which the client uses as the default player name.
+and issues it as both the token subject and `preferred_username`, which the client uses as the default player name,
+with the `simulation:read`, `simulation:write` and `simulation:observe` scopes so the simulation workbench designer can sign in with any username.
 Recreate the container (`docker compose up -d identity-provider`) after pulling an issuer change. Every service accepts only tokens carrying that issuer and fetches its signing keys over the Compose network, so the
 browser and the services agree on one issuer without hosts-file changes. The playtest overlay below excludes it.
 
