@@ -542,12 +542,10 @@ the actual client and services. Keep `pom.xml`'s Playwright version equal to the
 
 ## Deployed simulation workbench verification
 
-`workbench-e2e.yml` proves the simulation workbench milestone against real deployments: the workbench and its
+The workbench E2E proves the simulation workbench milestone against real deployments: the workbench and its
 designer UI drive isolated game/timeline/read lanes through authenticated participant and control interfaces, and
-gameplay is played by the real services. It runs when an epic closes (`epic-e2e.yml` includes it in its report) or via
-manual `workflow_dispatch` (`service`/`ref` select one repository at a branch, `lanes` sizes the lane set,
-`recovery-cases`/`recovery-interrupt-after` size the recovery run). It is independent of the system, browser and
-security suites, which remain the gates for human gameplay.
+gameplay is played by the real services. It runs locally only and has no CI workflow. It is independent of the
+system, browser and security suites, which remain the gates for human gameplay.
 
 | Suite | Runs | Proves |
 |---|---|---|
