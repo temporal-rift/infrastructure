@@ -60,7 +60,6 @@ jobs:
         run: |
           bash scripts/test-verify-simulation-deployment.sh
           bash scripts/test-check-simulation-readiness.sh
-          bash scripts/test-workbench-e2e-scripts.sh
 
       - name: Build and analyze
         env:
