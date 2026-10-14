@@ -43,6 +43,17 @@ final class Workbench {
         return get("/api/v1/policies").requireStatus(200).json().path("items");
     }
 
+    JsonNode laneBundles() {
+        return get("/api/v1/lane-bundles").requireStatus(200).json().path("items");
+    }
+
+    /** What the workbench offers a designer to cite in a manifest. */
+    record Catalog(JsonNode policies, JsonNode laneBundles) {}
+
+    Catalog catalog() {
+        return new Catalog(policies(), laneBundles());
+    }
+
     JsonNode createExperiment(JsonNode manifest, UUID key) {
         return post("/api/v1/experiments", manifest, key).requireStatus(201).json();
     }

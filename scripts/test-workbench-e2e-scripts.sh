@@ -124,6 +124,68 @@ status_of() { head -n1 | tr -d '\r'; }
 [[ "$(request 'POST /lanes/../etc/reset HTTP/1.1' 'Bearer token' | status_of)" == "HTTP/1.1 404 Not Found" ]] \
   || fail "a path outside the lane namespace answers 404"
 
+# --- the lane provenance declaration ----------------------------------------------------------------------------
+
+# shellcheck source=lib/workbench-lane-declaration.sh
+source "$repo_root/scripts/lib/workbench-lane-declaration.sh"
+
+write_lane_manifest() {
+  # $1 file, $2 game-service source revision
+  cat > "$1" <<MANIFEST
+{
+  "lane": "wbe2e-1",
+  "services": {
+    "game-service": "$2",
+    "timeline-service": "abcdef2",
+    "read-service": "abcdef3"
+  },
+  "contracts": {
+    "session-event": "7.0.0",
+    "session-api": "3.0.0",
+    "simulation-control-api": "1.1.1"
+  },
+  "configDigests": {
+    "game-service.yml": "$(printf 'f%.0s' {1..64})"
+  },
+  "effectiveRulesDigest": "$(printf 'a%.0s' {1..64})",
+  "rulesArtifactDigest": "$(printf 'b%.0s' {1..64})",
+  "contentArtifactDigest": "$(printf 'c%.0s' {1..64})"
+}
+MANIFEST
+}
+
+game_image="sha256:$(printf '1%.0s' {1..64})"
+timeline_image="sha256:$(printf '2%.0s' {1..64})"
+read_image="sha256:$(printf '3%.0s' {1..64})"
+
+write_lane_manifest "$work/m1.json" abcdef1
+write_lane_manifest "$work/m2.json" abcdef1
+declaration="$(workbench_lane_declaration wbe2e-1 "$work/m1.json" "$game_image" "$timeline_image" "$read_image")"
+for expected in \
+  "rules-artifact-digest: \"$(printf 'b%.0s' {1..64})\"" \
+  "content-artifact-digest: \"$(printf 'c%.0s' {1..64})\"" \
+  "image-digest: \"$game_image\"" \
+  'source-revision: "abcdef1"' \
+  'session-api: "3.0.0"' \
+  'session-event: "7.0.0"'; do
+  grep -qF -- "$expected" <<< "$declaration" || fail "the declaration must contain $expected"
+done
+if grep -q "simulation-control-api" <<< "$declaration"; then
+  fail "the operator control contract is not a participant or event module"
+fi
+[[ "$declaration" == "$(workbench_lane_declaration wbe2e-2 "$work/m2.json" "$game_image" "$timeline_image" "$read_image")" ]] \
+  || fail "lanes recording the same facts must declare the same provenance"
+
+write_lane_manifest "$work/unknown.json" unknown
+error="$(workbench_lane_declaration wbe2e-3 "$work/unknown.json" "$game_image" "$timeline_image" "$read_image" 2>&1 >/dev/null)" \
+  && fail "a manifest without a source revision must fail"
+grep -qF "lane wbe2e-3: services.game-service.source-revision" <<< "$error" \
+  || fail "the failure must name the lane and the key, got: $error"
+error="$(workbench_lane_declaration wbe2e-4 "$work/m1.json" "$game_image" "not-a-digest" "$read_image" 2>&1 >/dev/null)" \
+  && fail "a malformed image digest must fail"
+grep -qF "lane wbe2e-4: services.timeline-service.image-digest" <<< "$error" \
+  || fail "the failure must name the lane and the key, got: $error"
+
 # --- summarize-workbench-e2e.sh ---------------------------------------------------------------------------------
 
 if command -v jq > /dev/null; then

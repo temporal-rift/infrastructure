@@ -67,8 +67,8 @@ class WorkbenchRecoveryIT {
                 List.of(Manifests.RANDOM),
                 deployment.lanes().size(),
                 Integer.getInteger("workbenchE2e.caseTimeoutSeconds", 900));
-        var policies = designer.policies();
-        var experiment = designer.createExperiment(Manifests.build(deployment, policies, spec), UUID.randomUUID());
+        var catalog = designer.catalog();
+        var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
         experimentId = experiment.path("experimentId").asString();
         var key = UUID.randomUUID();
         var run = designer.startRun(experimentId, key);

@@ -42,8 +42,6 @@ final class Evidence {
         document.put("recordedAt", Instant.now().toString());
         document.put("timingMode", "LOGICAL");
         document.put("maxEras", deployment.maxEras());
-        document.set("services", deployment.services());
-        document.set("contracts", deployment.contracts());
         var lanes = document.putArray("lanes");
         deployment.lanes().forEach(lane -> {
             var node = lanes.addObject();

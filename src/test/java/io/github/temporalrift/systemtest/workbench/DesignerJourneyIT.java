@@ -72,13 +72,13 @@ class DesignerJourneyIT {
 
     @Test
     void aDesignerFreezesRunsComparesInspectsAndReproducesACaseInTheBrowser() throws Exception {
-        var catalog = new Workbench(
+        var offered = new Workbench(
                         deployment.workbenchUrl(),
                         new Issuer(deployment.issuer()).token("designer-api", Issuer.DESIGNER))
-                .policies();
+                .catalog();
         var manifest = Manifests.build(
                 deployment,
-                catalog,
+                offered,
                 new Manifests.Spec(
                         "journey " + deployment.runId() + " " + UUID.randomUUID(),
                         List.of(Manifests.BASELINE, Manifests.CANDIDATE),

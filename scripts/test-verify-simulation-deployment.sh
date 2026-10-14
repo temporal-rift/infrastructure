@@ -320,6 +320,10 @@ grep -q "\"effectiveRulesDigest\": \"$expected_rules\"" "$digests_root/manifest.
   || { echo "Manifest must record the effective rules digest." >&2; exit 1; }
 grep -q "\"effectiveContentDigest\": \"$expected_content\"" "$digests_root/manifest.json" \
   || { echo "Manifest must record the effective content digest." >&2; exit 1; }
+grep -q "\"rulesArtifactDigest\": \"$expected_rules\"" "$digests_root/manifest.json" \
+  || { echo "Manifest must record the rules artifact digest." >&2; exit 1; }
+grep -q "\"contentArtifactDigest\": \"$expected_content\"" "$digests_root/manifest.json" \
+  || { echo "Manifest must record the content artifact digest." >&2; exit 1; }
 
 # A tampered effective digest fails clearly.
 sed -i "s#\"effectiveRulesDigest\": \"$expected_rules\"#\"effectiveRulesDigest\": \"$(printf '0%.0s' {1..64})\"#" "$digests_root/manifest.json"

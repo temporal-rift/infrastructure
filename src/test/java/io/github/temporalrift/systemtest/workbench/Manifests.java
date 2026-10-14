@@ -58,25 +58,37 @@ final class Manifests {
         }
     }
 
-    static ObjectNode build(Deployment deployment, JsonNode policyCatalog, Spec spec) {
+    static ObjectNode build(Deployment deployment, Workbench.Catalog catalog, Spec spec) {
         var manifest = JSON.createObjectNode();
         manifest.put("schemaVersion", 1);
         manifest.put("name", spec.name());
         var variants = manifest.putArray("variants");
+        JsonNode provenance = null;
         for (var label : spec.variants()) {
             var lane = deployment.variantLane(label);
+            var bundle = servedBundle(catalog.laneBundles(), lane);
             var variant = variants.addObject();
             variant.put("label", label);
-            variant.putObject("rulesArtifact").put("digest", lane.rulesDigest());
-            variant.putObject("contentArtifact").put("digest", lane.contentDigest());
+            variant.set("rulesArtifact", bundle.path("rulesArtifact").deepCopy());
+            variant.set("contentArtifact", bundle.path("contentArtifact").deepCopy());
             variant.put("effectiveRulesDigest", lane.rulesDigest());
             variant.put("effectiveContentDigest", lane.contentDigest());
+            var served = JSON.createObjectNode();
+            served.set("services", bundle.path("services"));
+            served.set("contracts", bundle.path("contracts"));
+            if (provenance != null && !provenance.equals(served)) {
+                throw new IllegalStateException("The served bundles of the variants declare different provenance");
+            }
+            provenance = served;
         }
-        manifest.set("services", deployment.services().deepCopy());
-        manifest.set("contracts", deployment.contracts().deepCopy());
+        if (provenance == null) {
+            throw new IllegalStateException("A manifest needs at least one variant");
+        }
+        manifest.set("services", provenance.path("services").deepCopy());
+        manifest.set("contracts", provenance.path("contracts").deepCopy());
         var policies = manifest.putArray("policies");
         for (var policyId : spec.policyIds()) {
-            var bundle = policy(policyCatalog, policyId);
+            var bundle = policy(catalog.policies(), policyId);
             var policy = policies.addObject();
             policy.put("id", bundle.path("id").asString());
             policy.put("version", bundle.path("version").asString());
@@ -102,6 +114,17 @@ final class Manifests {
         manifest.put("caseWallTimeoutSeconds", spec.caseWallTimeoutSeconds());
         manifest.put("maxRejectedCandidatesPerWindow", 10);
         return manifest;
+    }
+
+    /** The bundle the workbench lists for the digests a lane serves. */
+    private static JsonNode servedBundle(JsonNode bundles, Deployment.Lane lane) {
+        for (var bundle : bundles) {
+            if (bundle.path("effectiveRulesDigest").asString().equals(lane.rulesDigest())
+                    && bundle.path("effectiveContentDigest").asString().equals(lane.contentDigest())) {
+                return bundle;
+            }
+        }
+        throw new IllegalStateException("The workbench does not list the bundle lane " + lane.id() + " serves");
     }
 
     private static JsonNode policy(JsonNode catalog, String id) {
