@@ -20,8 +20,6 @@ class WorkbenchHarnessTest {
             {"runId":"r1","issuer":"http://localhost:19000/default","workbenchUrl":"http://localhost:18200",
              "workbenchProject":"stack","ordinary":{"project":"ord","gameUrl":"g","timelineUrl":"t"},
              "maxEras":2,
-             "services":{"gameService":{"imageDigest":"sha256:%s","sourceRevision":"abc1234"}},
-             "contracts":{"session-api":"3.0.0"},
              "lanes":[
               {"id":"wbe2e-1","variant":"baseline","project":"p1","gameUrl":"g1","timelineUrl":"t1","readUrl":"r1",
                "kafkaBootstrap":"k1","rulesDigest":"%s","contentDigest":"%s",
@@ -29,7 +27,28 @@ class WorkbenchHarnessTest {
               {"id":"wbe2e-2","variant":"candidate","project":"p2","gameUrl":"g2","timelineUrl":"t2","readUrl":"r2",
                "kafkaBootstrap":"k2","rulesDigest":"%s","contentDigest":"%s",
                "bots":["00000000-0000-4000-8000-000000000002"]}]}
-            """.formatted("e".repeat(64), "a".repeat(64), "c".repeat(64), "b".repeat(64), "c".repeat(64));
+            """.formatted("a".repeat(64), "c".repeat(64), "b".repeat(64), "c".repeat(64));
+
+    private static final String LANE_BUNDLES = """
+            [{"rulesArtifact":{"digest":"%s"},"contentArtifact":{"digest":"%s","name":"base"},
+              "effectiveRulesDigest":"%s","effectiveContentDigest":"%s",
+              "services":{"gameService":{"imageDigest":"sha256:%s","sourceRevision":"abc1234"}},
+              "contracts":{"session-api":"3.0.0"},"laneCount":1},
+             {"rulesArtifact":{"digest":"%s"},"contentArtifact":{"digest":"%s","name":"base"},
+              "effectiveRulesDigest":"%s","effectiveContentDigest":"%s",
+              "services":{"gameService":{"imageDigest":"sha256:%s","sourceRevision":"abc1234"}},
+              "contracts":{"session-api":"3.0.0"},"laneCount":1}]
+            """.formatted(
+                    "1".repeat(64),
+                    "2".repeat(64),
+                    "a".repeat(64),
+                    "c".repeat(64),
+                    "e".repeat(64),
+                    "3".repeat(64),
+                    "2".repeat(64),
+                    "b".repeat(64),
+                    "c".repeat(64),
+                    "e".repeat(64));
 
     @Test
     void theFullFactionSetsAreTenThreeFourAndOneFiveFactionCombinations() {
@@ -51,7 +70,7 @@ class WorkbenchHarnessTest {
 
         var manifest = Manifests.build(
                 deployment,
-                catalog,
+                new Workbench.Catalog(catalog, Http.JSON.readTree(LANE_BUNDLES)),
                 new Manifests.Spec(
                         "m",
                         List.of("baseline", "candidate"),
@@ -65,9 +84,27 @@ class WorkbenchHarnessTest {
         assertThat(manifest.at("/variants/0/effectiveRulesDigest").asString()).isEqualTo("a".repeat(64));
         assertThat(manifest.at("/variants/1/effectiveRulesDigest").asString()).isEqualTo("b".repeat(64));
         assertThat(manifest.at("/variants/1/effectiveContentDigest").asString()).isEqualTo("c".repeat(64));
+        assertThat(manifest.at("/variants/0/rulesArtifact/digest").asString()).isEqualTo("1".repeat(64));
+        assertThat(manifest.at("/variants/1/contentArtifact/name").asString()).isEqualTo("base");
+        assertThat(manifest.at("/services/gameService/imageDigest").asString()).isEqualTo("sha256:" + "e".repeat(64));
+        assertThat(manifest.at("/contracts/session-api").asString()).isEqualTo("3.0.0");
         assertThat(manifest.at("/policies/0/artifactDigest").asString()).isEqualTo("d".repeat(64));
         assertThat(manifest.path("seatRotationMode").asString()).isEqualTo("CYCLIC");
         assertThat(manifest.path("timingMode").asString()).isEqualTo("LOGICAL");
+    }
+
+    @Test
+    void aManifestCannotCiteABundleTheWorkbenchDoesNotList() {
+        var deployment = Deployment.of(DESCRIPTOR);
+        var onlyBaseline = Http.JSON.readTree(LANE_BUNDLES).get(0);
+        var catalog = new Workbench.Catalog(
+                Http.JSON.readTree("[]"), Http.JSON.createArrayNode().add(onlyBaseline));
+        var spec =
+                new Manifests.Spec("m", List.of("candidate"), List.of("42"), List.of(3), List.of(), List.of(), 1, 900);
+
+        assertThatThrownBy(() -> Manifests.build(deployment, catalog, spec))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("wbe2e-2");
     }
 
     @Test

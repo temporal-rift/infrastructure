@@ -55,7 +55,7 @@ class WorkbenchMilestoneIT {
     private final Evidence evidence = new Evidence("core");
     private final int lanes = deployment.lanes().size();
 
-    private JsonNode policies;
+    private Workbench.Catalog catalog;
     private String matrixExperimentId;
     private String matrixRunId;
     private List<String> previewKeys;
@@ -83,9 +83,10 @@ class WorkbenchMilestoneIT {
     @Test
     @Order(1)
     void thePreviewListsAllTwoHundredTwentyCoordinates() {
-        policies = designer.policies();
-        evidence.put("policies", policies);
-        var manifest = Manifests.build(deployment, policies, matrixSpec());
+        catalog = designer.catalog();
+        evidence.put("policies", catalog.policies());
+        evidence.put("laneBundles", catalog.laneBundles());
+        var manifest = Manifests.build(deployment, catalog, matrixSpec());
 
         var preview = designer.post("/api/v1/experiment-previews?limit=500", manifest, null)
                 .requireStatus(200)
@@ -115,7 +116,7 @@ class WorkbenchMilestoneIT {
     @Test
     @Order(2)
     void aFrozenExperimentIsLaunchedAsADurableRun() {
-        var manifest = Manifests.build(deployment, policies, matrixSpec());
+        var manifest = Manifests.build(deployment, catalog, matrixSpec());
         var key = UUID.randomUUID();
 
         var experiment = designer.createExperiment(manifest, key);
@@ -233,6 +234,17 @@ class WorkbenchMilestoneIT {
         }
         evidence.put("winConditionGamesByVariant", decided);
         deployment.lanes().forEach(lane -> assertThat(lane.rulesDigest()).matches(SHA256));
+        var served = catalog.laneBundles();
+        var provisioned = deployment.lanes().stream()
+                .map(lane -> lane.rulesDigest() + "/" + lane.contentDigest())
+                .distinct()
+                .toList();
+        var listed = new ArrayList<String>();
+        served.forEach(bundle -> listed.add(bundle.path("effectiveRulesDigest").asString() + "/"
+                + bundle.path("effectiveContentDigest").asString()));
+        assertThat(listed)
+                .as("the served bundles are exactly the provisioned ones")
+                .containsExactlyInAnyOrderElementsOf(provisioned);
         assertThat(deployment.variantLane(Manifests.BASELINE).rulesDigest())
                 .as("the two variants serve different rules bundles")
                 .isNotEqualTo(deployment.variantLane(Manifests.CANDIDATE).rulesDigest());
@@ -399,7 +411,7 @@ class WorkbenchMilestoneIT {
                 List.of(Manifests.RANDOM, Manifests.GREEDY),
                 lanes,
                 CASE_TIMEOUT_SECONDS);
-        var experiment = designer.createExperiment(Manifests.build(deployment, policies, spec), UUID.randomUUID());
+        var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
         multiRunId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
                 .path("runId")
                 .asString();
@@ -627,7 +639,7 @@ class WorkbenchMilestoneIT {
                 List.of(Manifests.RANDOM),
                 lanes,
                 CASE_TIMEOUT_SECONDS);
-        var experiment = designer.createExperiment(Manifests.build(deployment, policies, spec), UUID.randomUUID());
+        var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
         return designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
                 .path("runId")
                 .asString();
@@ -699,7 +711,7 @@ class WorkbenchMilestoneIT {
                 List.of(Manifests.RANDOM),
                 lanes,
                 CASE_TIMEOUT_SECONDS);
-        var experiment = designer.createExperiment(Manifests.build(deployment, policies, spec), UUID.randomUUID());
+        var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
         var runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
                 .path("runId")
                 .asString();
@@ -728,7 +740,7 @@ class WorkbenchMilestoneIT {
     @Test
     @Order(9)
     void repeatedHttpOperationsNeverDuplicateExperimentsRunsOrSamples() {
-        var manifest = Manifests.build(deployment, policies, matrixSpec());
+        var manifest = Manifests.build(deployment, catalog, matrixSpec());
         var experiments = designer.get("/api/v1/experiments?limit=1")
                 .requireStatus(200)
                 .json()
@@ -790,7 +802,7 @@ class WorkbenchMilestoneIT {
                 List.of(Manifests.RANDOM),
                 lanes,
                 CASE_TIMEOUT_SECONDS);
-        var experiment = designer.createExperiment(Manifests.build(deployment, policies, spec), UUID.randomUUID());
+        var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
 
         var duplicators = new ArrayList<KafkaDuplicator>();
         deployment

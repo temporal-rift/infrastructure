@@ -22,6 +22,8 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 workspace="$(cd "$repo_root/.." && pwd)"
 # shellcheck source=lib/workbench-e2e.sh
 source "$script_dir/lib/workbench-e2e.sh"
+# shellcheck source=lib/workbench-lane-declaration.sh
+source "$script_dir/lib/workbench-lane-declaration.sh"
 
 lanes="${WORKBENCH_E2E_LANES:-4}"
 max_eras="${WORKBENCH_E2E_MAX_ERAS:-2}"
@@ -130,6 +132,32 @@ SIMULATION_IMAGE_TAG=wbe2e docker compose -p "$workbench_e2e_ordinary_project" \
   -f compose.yml -f compose.workbench-e2e-ordinary.yml \
   up -d --wait --wait-timeout 420 game-service timeline-service
 
+echo "== Deriving the lane provenance declarations"
+image_digest() { docker image inspect "temporal-rift/sim-$1:wbe2e" --format '{{.Id}}'; }
+game_image="$(image_digest game-service)"
+timeline_image="$(image_digest timeline-service)"
+read_image="$(image_digest read-service)"
+declarations="$out/declarations"
+mkdir -p "$declarations"
+for k in $(seq 1 "$lanes"); do
+  lane="${workbench_e2e_lane_prefix}$k"
+  workbench_lane_declaration "$lane" "$repo_root/simulation/lanes/$lane/manifest.json" \
+    "$game_image" "$timeline_image" "$read_image" > "$declarations/$lane.yml" \
+    || fail "no valid provenance declaration for lane $lane."
+done
+for k in $(seq 2 "$lanes"); do
+  lane="${workbench_e2e_lane_prefix}$k"
+  for other in $(seq 1 $((k - 1))); do
+    peer="${workbench_e2e_lane_prefix}$other"
+    if [[ "$(digest_of "$lane" effectiveRulesDigest)$(digest_of "$lane" effectiveContentDigest)" \
+      == "$(digest_of "$peer" effectiveRulesDigest)$(digest_of "$peer" effectiveContentDigest)" ]]; then
+      cmp -s "$declarations/$lane.yml" "$declarations/$peer.yml" \
+        || fail "lanes $peer and $lane serve the same bundle but declare different provenance."
+      break
+    fi
+  done
+done
+
 echo "== Writing the workbench lane configuration"
 {
   printf 'workbench:\n  execution:\n    worker-enabled: true\n    max-attempts-per-case: 1\n    lanes:\n'
@@ -143,6 +171,7 @@ echo "== Writing the workbench lane configuration"
     printf '        kafka-bootstrap-servers: kafka.%s.lane:9094\n' "$lane"
     printf '        rules-digest: %s\n' "$(digest_of "$lane" effectiveRulesDigest)"
     printf '        content-digest: %s\n' "$(digest_of "$lane" effectiveContentDigest)"
+    cat "$declarations/$lane.yml"
     printf '        reset-url: http://lane-recycler:8080/lanes/%s/reset\n' "$lane"
     printf '        bots:\n'
     for seat in 0 1 2 3 4; do
@@ -158,17 +187,6 @@ echo "== Writing the deployment descriptor"
   printf '  "workbenchProject": "%s",\n' "$workbench_e2e_project"
   printf '  "ordinary": {"project": "%s", "gameUrl": "http://127.0.0.1:18300", "timelineUrl": "http://127.0.0.1:18301"},\n' "$workbench_e2e_ordinary_project"
   printf '  "maxEras": %s,\n' "$max_eras"
-  printf '  "services": {\n'
-  printf '    "gameService": {"imageDigest": "%s", "sourceRevision": "%s"},\n' \
-    "$(docker image inspect temporal-rift/sim-game-service:wbe2e --format '{{.Id}}')" "$(git -C "$workspace/game-service" rev-parse HEAD)"
-  printf '    "timelineService": {"imageDigest": "%s", "sourceRevision": "%s"},\n' \
-    "$(docker image inspect temporal-rift/sim-timeline-service:wbe2e --format '{{.Id}}')" "$(git -C "$workspace/timeline-service" rev-parse HEAD)"
-  printf '    "readService": {"imageDigest": "%s", "sourceRevision": "%s"}\n' \
-    "$(docker image inspect temporal-rift/sim-read-service:wbe2e --format '{{.Id}}')" "$(git -C "$workspace/read-service" rev-parse HEAD)"
-  printf '  },\n'
-  # The lane manifest already attributes the exact contract pins the services were built with.
-  printf '  %s,\n' "$(awk '/"contracts": \{/ {capture = 1} capture {print} capture && /^  \}/ {exit}' \
-    "$repo_root/simulation/lanes/${workbench_e2e_lane_prefix}1/manifest.json" | tr -d '\n' | sed 's/,[[:space:]]*$//')"
   printf '  "lanes": [\n'
   for k in $(seq 1 "$lanes"); do
     lane="${workbench_e2e_lane_prefix}$k"

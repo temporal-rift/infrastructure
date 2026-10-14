@@ -78,14 +78,6 @@ final class Deployment {
         return root.path("maxEras").asInt();
     }
 
-    JsonNode services() {
-        return root.path("services");
-    }
-
-    JsonNode contracts() {
-        return root.path("contracts");
-    }
-
     JsonNode raw() {
         return root;
     }

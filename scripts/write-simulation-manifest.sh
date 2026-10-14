@@ -171,6 +171,8 @@ cp "$catalog_file" "$bundle_dir/future-events.yml"
   printf '  },\n'
   printf '  "effectiveRulesDigest": "%s",\n' "$(simulation_effective_rules_digest "$config_repo")"
   printf '  "effectiveContentDigest": "%s",\n' "$(simulation_effective_content_digest "$catalog_file")"
+  printf '  "rulesArtifactDigest": "%s",\n' "$(simulation_rules_artifact_digest "$config_repo")"
+  printf '  "contentArtifactDigest": "%s",\n' "$(simulation_content_artifact_digest "$catalog_file")"
   printf '  "bundle": "retained alongside this manifest under bundle/"\n'
   printf '}\n'
 } > "$output"

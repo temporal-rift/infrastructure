@@ -29,3 +29,12 @@ simulation_effective_rules_digest() {
 simulation_effective_content_digest() {
   simulation_file_digest "$1"
 }
+
+# A lane's bundle files are the artifact it serves, so the artifact digests equal the effective digests.
+simulation_rules_artifact_digest() {
+  simulation_effective_rules_digest "$1"
+}
+
+simulation_content_artifact_digest() {
+  simulation_effective_content_digest "$1"
+}
