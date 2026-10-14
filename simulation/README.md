@@ -129,6 +129,17 @@ repository), mounted into that lane's config server. `scripts/prepare-simulation
 digest), and `verify-simulation-deployment.sh` recomputes both. It also records `rulesArtifactDigest` and
 `contentArtifactDigest`; a lane serves its bundle's own files, so they equal the effective digests.
 
+## Lane provenance declared to the workbench
+
+`scripts/provision-workbench-e2e.sh` writes the workbench's lane configuration. Besides `rules-digest` and
+`content-digest`, each lane entry declares `rules-artifact-digest` and `content-artifact-digest` (from the manifest),
+`services` (`game-service`, `timeline-service` and `read-service`, each with the built image's `image-digest` and the
+manifest's `source-revision`) and `contracts` (the manifest's exact version of every participant and event module;
+the operator's `simulation-control-api` is not declared). Provisioning fails naming the lane and the key (for example
+`lane wbe2e-1: services.game-service.source-revision`) when a value is missing or malformed, and when two lanes serving
+the same bundle would declare different provenance. The system tests cite `services` and `contracts` from the
+bundles the workbench lists at `GET /api/v1/lane-bundles`.
+
 ## Recycling a used lane
 
 A lane accepts only one execution context for its lifetime. `scripts/recycle-simulation-lane.sh <lane-env-file>`
