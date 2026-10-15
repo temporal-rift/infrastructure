@@ -11,7 +11,7 @@
 # of this repository, and MAVEN_SETTINGS (Maven settings with a `github` server entry) for the image builds.
 #
 # Optional environment:
-#   WORKBENCH_E2E_LANES     Number of lanes, even and at least 2 (default 4). Lanes 1..N/2 serve the
+#   WORKBENCH_E2E_LANES     Number of lanes, even and at least 2 (default 2). Lanes 1..N/2 serve the
 #                           baseline bundle, the rest the candidate bundle.
 #   WORKBENCH_E2E_MAX_ERAS  Game length served by both bundles (default 2).
 #   WORKBENCH_E2E_RUN_ID    Attribution recorded on every lane (default local).
@@ -25,7 +25,7 @@ source "$script_dir/lib/workbench-e2e.sh"
 # shellcheck source=lib/workbench-lane-declaration.sh
 source "$script_dir/lib/workbench-lane-declaration.sh"
 
-lanes="${WORKBENCH_E2E_LANES:-4}"
+lanes="${WORKBENCH_E2E_LANES:-2}"
 max_eras="${WORKBENCH_E2E_MAX_ERAS:-2}"
 run_id="${WORKBENCH_E2E_RUN_ID:-local}"
 out="$repo_root/target/workbench-e2e"
