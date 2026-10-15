@@ -563,7 +563,7 @@ suite instead shows decisions depend only on participant views by reproducing di
 - an OIDC issuer (`ghcr.io/navikt/mock-oauth2-server`, `http://localhost:19000/default`) with interactive designer login
   (`designer` has read, write and observe scopes) and client-credentials tokens for the operator and the deterministic
   bot identities;
-- N lanes (`temporal-rift-sim-wbe2e-<n>`, default 4), each `compose.yml` + `compose.simulation.yml` +
+- N lanes (`temporal-rift-sim-wbe2e-<n>`, default 2), each `compose.yml` + `compose.simulation.yml` +
   `compose.simulation-observer.yml`, half serving the `baseline` configuration bundle and half the `candidate` one
   (`scripts/prepare-simulation-bundle.sh`: the same game length, win score threshold 20 vs 22). Each lane manifest
   records its bundle's `effectiveRulesDigest` and `effectiveContentDigest`;
