@@ -22,6 +22,13 @@ game:
     cards-per-hand: 5
     cards-per-deal: 7
     win-score-threshold: 20
+    victory:
+      eraser-annihilations: 4
+      prophet-written-resolutions: 4
+      revisionist-successful-eras: 3
+      weaver-chain-length: 3
+      activist-consecutive-declarations: 3
+    seal-max-uses-per-game: 2
     reconnect-grace-period-seconds: 30
     action-round-timer-seconds:
       3: 180
