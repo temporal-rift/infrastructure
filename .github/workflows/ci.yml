@@ -56,6 +56,9 @@ jobs:
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
 
+      - name: Install PyYAML for the lane rules resolver
+        run: python3 -m pip install --disable-pip-version-check --quiet pyyaml
+
       - name: Validate the simulation lane scripts
         run: |
           bash scripts/test-verify-simulation-deployment.sh

@@ -22,6 +22,8 @@ repo_root="$(cd "$script_dir/.." && pwd)"
 workspace="$(cd "$repo_root/.." && pwd)"
 # shellcheck source=lib/workbench-e2e.sh
 source "$script_dir/lib/workbench-e2e.sh"
+# shellcheck source=lib/simulation-bundle.sh
+source "$script_dir/lib/simulation-bundle.sh"
 # shellcheck source=lib/workbench-lane-declaration.sh
 source "$script_dir/lib/workbench-lane-declaration.sh"
 
@@ -99,6 +101,11 @@ ENV
     bash scripts/write-simulation-manifest.sh > /dev/null
     SIMULATION_SKIP_ISSUER_REACHABILITY=1 bash scripts/verify-simulation-deployment.sh
   )
+  workbench_lane_rules_document "$lane" \
+    "$repo_root/simulation/lanes/$lane/effective-rules.json" \
+    "/etc/workbench/lanes/$lane/effective-rules.json" \
+    "$(digest_of "$lane" effectiveRulesDigest)" > /dev/null \
+    || fail "lane $lane: rules-document is unavailable."
 done
 
 lane_compose() {
@@ -170,6 +177,13 @@ echo "== Writing the workbench lane configuration"
     printf '        operator-token: %s\n' "$operator_token"
     printf '        kafka-bootstrap-servers: kafka.%s.lane:9094\n' "$lane"
     printf '        rules-digest: %s\n' "$(digest_of "$lane" effectiveRulesDigest)"
+    rules_document="$(workbench_lane_rules_document \
+      "$lane" \
+      "$repo_root/simulation/lanes/$lane/effective-rules.json" \
+      "/etc/workbench/lanes/$lane/effective-rules.json" \
+      "$(digest_of "$lane" effectiveRulesDigest)")" \
+      || fail "lane $lane: rules-document is unavailable."
+    printf '        rules-document: %s\n' "$rules_document"
     printf '        content-digest: %s\n' "$(digest_of "$lane" effectiveContentDigest)"
     cat "$declarations/$lane.yml"
     printf '        reset-url: http://lane-recycler:8080/lanes/%s/reset\n' "$lane"

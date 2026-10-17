@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Writes the immutable effective manifest for one isolated simulation lane: lane
-# attribution, service revisions, adopted contract versions, resolved rules/content digests,
-# the logical timing mode, and the identity configuration (scopes and issuer only — never
-# credential material).
+# attribution, service revisions, adopted contract versions, the resolved effective rules
+# document and its digest, the content digest, the logical timing mode, and the identity
+# configuration (scopes and issuer only — never credential material).
 #
 # Usage: bash scripts/write-simulation-manifest.sh [output-file]
 #
@@ -18,10 +18,10 @@
 #   SIMULATION_CONFIG_REPO  Directory holding the served config-repo YAML files.
 #   SIMULATION_CATALOG      Path to the served event-catalog file.
 #
-# The manifest is written to simulation/lanes/<lane>/manifest.json together with retained
-# copies of every digest input, so the lane directory carries its own attribution and its
-# own inspectable bundle contents. Regenerate it for every lane deployment; never hand-edit
-# a generated manifest.
+# The manifest is written to simulation/lanes/<lane>/manifest.json together with the
+# canonical effective-rules.json and retained copies of every digest input, so the lane
+# directory carries its own attribution and its own inspectable bundle contents.
+# Regenerate it for every lane deployment; never hand-edit a generated manifest.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -123,13 +123,18 @@ for required_input in \
 done
 
 mkdir -p "$(dirname "$output")"
-bundle_dir="$(dirname "$output")/bundle"
+manifest_dir="$(cd "$(dirname "$output")" && pwd)"
+bundle_dir="$manifest_dir/bundle"
 mkdir -p "$bundle_dir"
 cp "$config_repo/application.yml" "$bundle_dir/application.yml"
 cp "$config_repo/game-service.yml" "$bundle_dir/game-service.yml"
 cp "$config_repo/timeline-service.yml" "$bundle_dir/timeline-service.yml"
 cp "$config_repo/read-service.yml" "$bundle_dir/read-service.yml"
 cp "$catalog_file" "$bundle_dir/future-events.yml"
+
+rules_document="$manifest_dir/effective-rules.json"
+effective_rules_digest="$(simulation_effective_rules_document "$config_repo" "$rules_document")"
+rules_artifact_digest="$(simulation_rules_artifact_digest "$rules_document")"
 
 {
   printf '{\n'
@@ -169,9 +174,9 @@ cp "$catalog_file" "$bundle_dir/future-events.yml"
   printf '    "read-service.yml": "%s",\n' "$(file_digest "$config_repo/read-service.yml")"
   printf '    "future-events.yml": "%s"\n' "$(file_digest "$catalog_file")"
   printf '  },\n'
-  printf '  "effectiveRulesDigest": "%s",\n' "$(simulation_effective_rules_digest "$config_repo")"
+  printf '  "effectiveRulesDigest": "%s",\n' "$effective_rules_digest"
   printf '  "effectiveContentDigest": "%s",\n' "$(simulation_effective_content_digest "$catalog_file")"
-  printf '  "rulesArtifactDigest": "%s",\n' "$(simulation_rules_artifact_digest "$config_repo")"
+  printf '  "rulesArtifactDigest": "%s",\n' "$rules_artifact_digest"
   printf '  "contentArtifactDigest": "%s",\n' "$(simulation_content_artifact_digest "$catalog_file")"
   printf '  "bundle": "retained alongside this manifest under bundle/"\n'
   printf '}\n'

@@ -3,6 +3,7 @@
 !.env.example
 target/
 *.iml
+__pycache__/
 # Generated per deployment; never commit an effective manifest.
 playtest/manifest.json
 # Generated per lane deployment; never commit an effective lane manifest or bundle.

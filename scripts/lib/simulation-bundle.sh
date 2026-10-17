@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Shared definitions of a simulation lane's configuration bundle. Sourced, not executed.
 #
-# A bundle is the served config-repo directory plus the event catalog. Its effective digests are
-# derived only from file bytes, so the manifest writer, the deployment verifier and the bundle
-# preparation script cannot disagree about what a lane serves.
+# A bundle is the served config-repo directory plus the event catalog. Its effective rules document
+# is the canonical EffectiveRules document resolved from the served YAML, and its content digest is
+# the event catalog's own digest. The manifest writer, the deployment verifier and the bundle
+# preparation script all derive these values here so they cannot disagree.
 
-# The served rules files, in the fixed order their digests are combined.
-simulation_rules_files=(application.yml game-service.yml read-service.yml timeline-service.yml)
+simulation_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 simulation_file_digest() {
   if [[ -f "$1" ]]; then
@@ -16,13 +16,44 @@ simulation_file_digest() {
   fi
 }
 
-# SHA-256 over "<name>:<file digest>" lines of the served rules files.
+# Prints a Python interpreter that can import PyYAML, or fails with the required dependency.
+simulation_python() {
+  local candidate
+  for candidate in python3 python; do
+    if command -v "$candidate" > /dev/null 2>&1 && "$candidate" -c 'import yaml' > /dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  echo "Cannot resolve effective rules: Python 3 with PyYAML is required (pip install pyyaml)." >&2
+  return 1
+}
+
+# Writes the canonical EffectiveRules document for a config repo to the given path and prints its
+# effective rules digest. Fails with RULES_CONFLICT when two services disagree about a key.
+simulation_effective_rules_document() {
+  local config_repo="$1"
+  local output="$2"
+  local python
+  python="$(simulation_python)" || return 1
+  "$python" "$simulation_lib_dir/effective_rules.py" resolve \
+    --config-repo "$config_repo" --output "$output"
+}
+
+# Prints the effective rules digest of the document resolved from a config repo.
 simulation_effective_rules_digest() {
   local config_repo="$1"
-  local name
-  for name in "${simulation_rules_files[@]}"; do
-    printf '%s:%s\n' "$name" "$(simulation_file_digest "$config_repo/$name")"
-  done | sha256sum | awk '{print $1}'
+  local python
+  python="$(simulation_python)" || return 1
+  "$python" "$simulation_lib_dir/effective_rules.py" digest --config-repo "$config_repo"
+}
+
+# Prints the effective rules digest of an existing EffectiveRules document file.
+simulation_effective_rules_document_digest() {
+  local document="$1"
+  local python
+  python="$(simulation_python)" || return 1
+  "$python" "$simulation_lib_dir/effective_rules.py" document-digest --file "$document"
 }
 
 # The content digest is the event catalog's own digest.
@@ -30,9 +61,9 @@ simulation_effective_content_digest() {
   simulation_file_digest "$1"
 }
 
-# A lane's bundle files are the artifact it serves, so the artifact digests equal the effective digests.
+# A lane's rules artifact is the retained EffectiveRules document, so its digest is the file's own.
 simulation_rules_artifact_digest() {
-  simulation_effective_rules_digest "$1"
+  simulation_file_digest "$1"
 }
 
 simulation_content_artifact_digest() {

@@ -432,8 +432,10 @@ access is impossible by construction: each lane project starts its own
 single-tenant plaintext broker, topics, and volumes.
 
 Each lane deployment writes an immutable manifest (`simulation/lanes/<lane>/`) recording
-service revisions, adopted contract versions, rules/content digests with retained bundle
-contents, the `LOGICAL` timing mode, and identity attribution without secrets.
+service revisions, adopted contract versions, the canonical effective rules document and its
+digests, content digests with retained bundle contents, the `LOGICAL` timing mode, and identity
+attribution without secrets. `effectiveRulesDigest` identifies the rules meaning computed from
+`properties`; `rulesArtifactDigest` identifies the retained `effective-rules.json` artifact.
 `verify-simulation-deployment.sh` fails before startup on any missing or drifted input
 (`MANIFEST_MISMATCH`), and `check-simulation-readiness.sh` requires both services
 drained on the same bundle plus downstream watermark observation before gameplay.
@@ -566,15 +568,18 @@ suite instead shows decisions depend only on participant views by reproducing di
 - N lanes (`temporal-rift-sim-wbe2e-<n>`, default 2), each `compose.yml` + `compose.simulation.yml` +
   `compose.simulation-observer.yml`, half serving the `baseline` configuration bundle and half the `candidate` one
   (`scripts/prepare-simulation-bundle.sh`: the same game length, win score threshold 20 vs 22). Each lane manifest
-  records its bundle's `effectiveRulesDigest` and `effectiveContentDigest`;
+  records its bundle's `effectiveRulesDigest`, `rulesArtifactDigest` and `effectiveContentDigest`, and retains the
+  canonical `effective-rules.json` beside it;
 - an ordinary deployment (`temporal-rift-wbe2e-ordinary`) without simulation mode;
 - the workbench stack (`temporal-rift-workbench-e2e`): the workbench, its database and a lane recycler.
 
 A lane hosts a single case for its lifetime, so the workbench calls the recycler's `POST /lanes/{lane}/reset` after each
 case; `scripts/recycle-simulation-lane.sh` removes only that lane's project and starts it again. The workbench
-consumes per-lane broker addresses, served bundle digests and the reset hook as lane configuration
-(`workbench.execution.lanes[]`), written to `target/workbench-e2e/lanes.yml` together with the lane credentials, which
-never enter evidence.
+consumes per-lane broker addresses, served bundle digests, the lane's `rules-document`, and the reset hook as lane
+configuration (`workbench.execution.lanes[]`), written to `target/workbench-e2e/lanes.yml` together with the lane
+credentials, which never enter evidence. The lane manifest directory is mounted read-only at `/etc/workbench/lanes`,
+and provisioning refuses a lane whose document is missing or whose canonical properties digest differs from
+`rules-digest`.
 
 ### Run locally
 

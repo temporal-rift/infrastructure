@@ -17,6 +17,8 @@ disposable lane project.
 - Free loopback host ports for the lane services
   (`SIMULATION_GAME_PORT`, `SIMULATION_TIMELINE_PORT`, `SIMULATION_READ_PORT`,
   defaulting to `18180`, `18181`, `18182`).
+- Python 3 with PyYAML (`pip install pyyaml`) to resolve the lane's effective rules
+  document.
 
 ## Provision a lane
 
@@ -32,11 +34,12 @@ bash scripts/check-simulation-readiness.sh
 
 `write-simulation-manifest.sh` records the lane attribution, service revisions, adopted
 contract versions (including the control contract shared by game-service and
-timeline-service), SHA-256 digests of the served rules/content inputs, the
-`LOGICAL` timing mode, and the identity configuration without credential material. It
-also retains copies of every digest input beside the manifest at
-`simulation/lanes/<lane>/`, so a later reader inspects what the lane actually served.
-Regenerate the manifest for every lane deployment; never hand-edit it.
+timeline-service), the resolved effective rules document and its digests, the content
+digest, the `LOGICAL` timing mode, and the identity configuration without credential
+material. It also retains the canonical `effective-rules.json` and copies of every other
+digest input beside the manifest at `simulation/lanes/<lane>/`, so a later reader
+inspects what the lane actually served. Regenerate the manifest for every lane
+deployment; never hand-edit it.
 
 `verify-simulation-deployment.sh` fails before any container starts when the lane,
 issuer, overlay, contract pins, manifest, retained bundle, broker grants, or score
@@ -124,21 +127,33 @@ never appears on the shared network (it would resolve to every lane's broker). S
 
 A lane serves exactly one bundle: the directory named by `SIMULATION_CONFIG_REPO` (default the shared config
 repository), mounted into that lane's config server. `scripts/prepare-simulation-bundle.sh --out DIR [--max-eras N]
-[--win-score-threshold T]` makes a variant, failing if a requested edit matches nothing. The manifest records
-`effectiveRulesDigest` (a digest over the served rules files' digests) and `effectiveContentDigest` (the event catalog's
-digest), and `verify-simulation-deployment.sh` recomputes both. It also records `rulesArtifactDigest` and
-`contentArtifactDigest`; a lane serves its bundle's own files, so they equal the effective digests.
+[--win-score-threshold T]` makes a variant, failing if a requested edit matches nothing.
+
+The manifest writer resolves every `game.rules.*` leaf for each service by layering
+`game-service.yml`, `timeline-service.yml`, or `read-service.yml` over `application.yml`, flattens nested maps with
+`.`, and refuses a key two services resolve differently as `RULES_CONFLICT`, naming the key and both services. The
+result is one `EffectiveRules` document `{schemaVersion: 1, properties}`, retained as
+`simulation/lanes/<lane>/effective-rules.json` in RFC 8785 canonical form.
+
+`effectiveRulesDigest` is the canonical digest of `properties` (the rules meaning the workbench materialises), while
+`rulesArtifactDigest` is the SHA-256 of the retained file bytes (the stored artifact). The two intentionally differ.
+`effectiveContentDigest` and `contentArtifactDigest` still describe the event catalog. `verify-simulation-deployment.sh`
+recomputes the document from the bundle, compares the retained bytes, and checks both rules digests and the content
+digest, failing as `MANIFEST_MISMATCH` after any drift.
 
 ## Lane provenance declared to the workbench
 
 `scripts/provision-workbench-e2e.sh` writes the workbench's lane configuration. Besides `rules-digest` and
-`content-digest`, each lane entry declares `rules-artifact-digest` and `content-artifact-digest` (from the manifest),
-`services` (`game-service`, `timeline-service` and `read-service`, each with the built image's `image-digest` and the
-manifest's `source-revision`) and `contracts` (the manifest's exact version of every participant and event module;
-the operator's `simulation-control-api` is not declared). Provisioning fails naming the lane and the key (for example
-`lane wbe2e-1: services.game-service.source-revision`) when a value is missing or malformed, and when two lanes serving
-the same bundle would declare different provenance. The system tests cite `services` and `contracts` from the
-bundles the workbench lists at `GET /api/v1/lane-bundles`.
+`content-digest`, each lane entry declares `rules-document` (its retained `effective-rules.json`), `rules-artifact-digest`
+and `content-artifact-digest` (from the manifest), `services` (`game-service`, `timeline-service` and `read-service`,
+each with the built image's `image-digest` and the manifest's `source-revision`) and `contracts` (the manifest's exact
+version of every participant and event module; the operator's `simulation-control-api` is not declared). The lane
+manifest directory is mounted read-only at `/etc/workbench/lanes`, and `rules-document` points at the mounted file.
+Provisioning fails naming the lane and `rules-document` when that file is missing or its canonical `properties`
+digest differs from `rules-digest`; it fails naming the lane and the key (for example
+`lane wbe2e-1: services.game-service.source-revision`) when any other value is missing or malformed, and when two
+lanes serving the same bundle would declare different provenance. The system tests cite `services` and `contracts`
+from the bundles the workbench lists at `GET /api/v1/lane-bundles`.
 
 ## Recycling a used lane
 

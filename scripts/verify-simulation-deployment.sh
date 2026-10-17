@@ -235,14 +235,32 @@ check_digest_matches "timeline-service.yml" "$config_repo/timeline-service.yml"
 check_digest_matches "read-service.yml" "$config_repo/read-service.yml"
 check_digest_matches "future-events.yml" "$catalog_file"
 
-[[ "$(manifest_value "effectiveRulesDigest")" == "$(simulation_effective_rules_digest "$config_repo")" ]] \
+# The retained EffectiveRules document is the artifact the workbench reads. It must be
+# byte-identical to the canonical document resolved from the served bundle, its canonical
+# properties digest must match effectiveRulesDigest, and its own file digest must match
+# rulesArtifactDigest. The two digests deliberately differ: meaning versus stored artifact.
+manifest_dir="$(cd "$(dirname "$manifest")" && pwd)"
+retained_rules="$manifest_dir/effective-rules.json"
+[[ -f "$retained_rules" ]] \
+  || fail "retained effective rules document not found at $retained_rules: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
+
+rules_scratch="$(mktemp)"
+trap 'rm -f "$rules_scratch"' EXIT
+expected_rules_digest="$(simulation_effective_rules_document "$config_repo" "$rules_scratch")"
+cmp -s "$rules_scratch" "$retained_rules" \
+  || fail "retained effective rules document differs from the served rules in $config_repo: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
+[[ "$(manifest_value "effectiveRulesDigest")" == "$expected_rules_digest" ]] \
   || fail "manifest effectiveRulesDigest does not match the served rules in $config_repo: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
+[[ "$(simulation_effective_rules_document_digest "$retained_rules")" == "$(manifest_value "effectiveRulesDigest")" ]] \
+  || fail "retained effective rules document digest does not match manifest effectiveRulesDigest: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
+[[ "$(simulation_file_digest "$retained_rules")" == "$(manifest_value "rulesArtifactDigest")" ]] \
+  || fail "manifest rulesArtifactDigest does not match the retained effective rules document: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
+
 [[ "$(manifest_value "effectiveContentDigest")" == "$(simulation_effective_content_digest "$catalog_file")" ]] \
   || fail "manifest effectiveContentDigest does not match $catalog_file: regenerate the manifest for this lane (MANIFEST_MISMATCH)."
 
 # The retained bundle carries the exact contents the digests attest, so a later
 # reader inspects what the lane actually served.
-manifest_dir="$(cd "$(dirname "$manifest")" && pwd)"
 for retained in application.yml game-service.yml timeline-service.yml read-service.yml future-events.yml; do
   [[ -f "$manifest_dir/bundle/$retained" ]] \
     || fail "retained bundle is missing $retained beside the manifest: regenerate the manifest for this lane."

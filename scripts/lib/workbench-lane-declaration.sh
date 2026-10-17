@@ -23,8 +23,7 @@ workbench_manifest_contracts() {
 # Prints a lane's declaration as the workbench lane configuration's keys at the indentation of a lane entry's
 # fields. Fails, naming the lane and the key, when a value is unavailable or malformed.
 # Usage: workbench_lane_declaration <lane> <manifest> <game image digest> <timeline image digest> <read image digest>
-workbench_lane_declaration() {
-  local lane="$1" manifest="$2" game_image="$3" timeline_image="$4" read_image="$5"
+workbench_lane_declaration() {  local lane="$1" manifest="$2" game_image="$3" timeline_image="$4" read_image="$5"
   local rules content module version service image revision
 
   invalid() {
@@ -61,4 +60,26 @@ workbench_lane_declaration() {
     [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { invalid "contracts.$module" "$version"; return 1; }
     printf '          %s: "%s"\n' "$module" "$version"
   done <<< "$contracts"
+}
+
+# Validates a lane's retained EffectiveRules document against the lane's declared rules digest and prints
+# the path the workbench reads. Fails, naming the lane and rules-document, when the file is missing,
+# unreadable, or its canonical properties digest differs.
+# Usage: workbench_lane_rules_document <lane> <host path> <workbench path> <rules digest>
+workbench_lane_rules_document() {
+  local lane="$1" host="$2" workbench_path="$3" expected="$4" actual
+
+  if [[ ! -f "$host" ]]; then
+    echo "lane $lane: rules-document is missing: $host." >&2
+    return 1
+  fi
+  actual="$(simulation_effective_rules_document_digest "$host" 2> /dev/null)" || {
+    echo "lane $lane: rules-document is not a readable EffectiveRules document: $host." >&2
+    return 1
+  }
+  if [[ "$actual" != "$expected" ]]; then
+    echo "lane $lane: rules-document canonical digest '$actual' does not match rules-digest '$expected'." >&2
+    return 1
+  fi
+  printf '%s\n' "$workbench_path"
 }
