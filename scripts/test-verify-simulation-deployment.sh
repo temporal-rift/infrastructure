@@ -468,6 +468,36 @@ conflict_output="$(
 [[ ! -f "$conflict_root/manifest.json" && ! -f "$conflict_root/effective-rules.json" ]] \
   || { echo "A refused conflict must write neither the manifest nor the rules document." >&2; exit 1; }
 
+# A dotted key colliding with a nested mapping is refused instead of silently overwriting.
+collision_root="$fixtures_dir/collision"
+setup_valid_deployment "$collision_root"
+rm -f "$collision_root/manifest.json" "$collision_root/effective-rules.json"
+cat > "$collision_root/config-repo/application.yml" <<'EOF'
+game:
+  rules:
+    probability.floor: 5
+    probability:
+      floor: 0
+      push-shift:
+        II: 20
+      amplify-multiplier:
+        II: 2.0
+EOF
+collision_output="$(
+  SIMULATION_SERVICES_DIR="$collision_root/services" \
+    SIMULATION_CONFIG_REPO="$collision_root/config-repo" \
+    SIMULATION_CATALOG="$collision_root/catalog.yml" \
+    SIMULATION_LANE="lane-a" \
+    SIMULATION_EXPERIMENT="exp-1" \
+    SIMULATION_CASE="case-1" \
+    JWT_ISSUER_URI="https://issuer.example" \
+    bash "$writer" "$collision_root/manifest.json" 2>&1
+)" && { echo "A colliding dotted rule key must fail manifest writing." >&2; exit 1; }
+[[ "$collision_output" == *"RULES_CONFLICT"* && "$collision_output" == *"game.rules.probability.floor"* ]] \
+  || { echo "The collision must name RULES_CONFLICT and the key, got: $collision_output" >&2; exit 1; }
+[[ ! -f "$collision_root/manifest.json" && ! -f "$collision_root/effective-rules.json" ]] \
+  || { echo "A refused collision must write neither the manifest nor the rules document." >&2; exit 1; }
+
 # A bundle prepared with a different threshold has different effective rules digests.
 bundle_a="$fixtures_dir/bundle-a"
 bundle_b="$fixtures_dir/bundle-b"
