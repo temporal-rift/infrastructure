@@ -8,6 +8,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
 validator="$script_dir/verify-simulation-deployment.sh"
 writer="$script_dir/write-simulation-manifest.sh"
+# shellcheck source=lib/simulation-bundle.sh
+source "$script_dir/lib/simulation-bundle.sh"
+# shellcheck source=lib/workbench-lane-declaration.sh
+source "$script_dir/lib/workbench-lane-declaration.sh"
 
 fixtures_dir="$(mktemp -d)"
 trap 'rm -rf "$fixtures_dir"' EXIT
@@ -43,13 +47,23 @@ setup_valid_deployment() {
   write_pom "$root/services/timeline-service"
   write_pom "$root/services/read-service"
   mkdir -p "$root/config-repo"
-  echo "game: {}" > "$root/config-repo/application.yml"
+  cat > "$root/config-repo/application.yml" <<'EOF'
+game:
+  rules:
+    probability:
+      floor: 0
+      push-shift:
+        II: 20
+      amplify-multiplier:
+        II: 2.0
+EOF
   # Minimal served score rules: the validator requires the reveal-based Expose delta and
   # rejects the retired behavior-change key. The digest writer records whatever file is
   # here, so fixtures stay internally consistent.
   cat > "$root/config-repo/game-service.yml" <<'EOF'
 game:
   rules:
+    win-score-threshold: 20
     scoring:
       score-deltas:
         EXPOSE_SIGNATURE_REVEALED: 2
@@ -309,26 +323,150 @@ echo 'grant "$lane-observer" --operation Read --topic "*"' >> "$wildcard_root/ac
 SIMULATION_ACLS_SCRIPT="$wildcard_root/acls.sh" assert_failure_contains "must not contain wildcard" \
   run_validator "$wildcard_root"
 
-# The manifest attributes the bundle's effective digests, derived from the retained bytes.
+# The manifest attributes the bundle's effective rules document, its meaning digest, and the
+# retained file's artifact digest.
 digests_root="$fixtures_dir/digests"
 setup_valid_deployment "$digests_root"
-# shellcheck source=lib/simulation-bundle.sh
-source "$script_dir/lib/simulation-bundle.sh"
 expected_rules="$(simulation_effective_rules_digest "$digests_root/config-repo")"
 expected_content="$(simulation_effective_content_digest "$digests_root/catalog.yml")"
+rules_document="$digests_root/effective-rules.json"
+expected_rules_artifact="$(simulation_file_digest "$rules_document")"
+[[ -f "$rules_document" ]] || { echo "The writer must retain effective-rules.json beside the manifest." >&2; exit 1; }
+grep -q '"game.rules.win-score-threshold":20' "$rules_document" \
+  || { echo "The retained document must carry the served win-score-threshold." >&2; exit 1; }
+grep -q '"game.rules.probability.push-shift.II":20' "$rules_document" \
+  || { echo "The retained document must carry the served push-shift.II." >&2; exit 1; }
 grep -q "\"effectiveRulesDigest\": \"$expected_rules\"" "$digests_root/manifest.json" \
   || { echo "Manifest must record the effective rules digest." >&2; exit 1; }
 grep -q "\"effectiveContentDigest\": \"$expected_content\"" "$digests_root/manifest.json" \
   || { echo "Manifest must record the effective content digest." >&2; exit 1; }
-grep -q "\"rulesArtifactDigest\": \"$expected_rules\"" "$digests_root/manifest.json" \
-  || { echo "Manifest must record the rules artifact digest." >&2; exit 1; }
+grep -q "\"rulesArtifactDigest\": \"$expected_rules_artifact\"" "$digests_root/manifest.json" \
+  || { echo "Manifest must record the retained document's artifact digest." >&2; exit 1; }
 grep -q "\"contentArtifactDigest\": \"$expected_content\"" "$digests_root/manifest.json" \
   || { echo "Manifest must record the content artifact digest." >&2; exit 1; }
+[[ "$expected_rules" != "$expected_rules_artifact" ]] \
+  || { echo "Rules meaning and stored artifact must have distinct digests." >&2; exit 1; }
+[[ "$(simulation_effective_rules_document_digest "$rules_document")" == "$expected_rules" ]] \
+  || { echo "The retained document's canonical digest must equal effectiveRulesDigest." >&2; exit 1; }
+
+# The shared config repository resolves the values the story names, without service checkouts.
+shared_rules="$fixtures_dir/shared-effective-rules.json"
+shared_digest="$(simulation_effective_rules_document "$repo_root/config-server/config-repo" "$shared_rules")"
+grep -q '"game.rules.win-score-threshold":20' "$shared_rules" \
+  || { echo "The shared config repository must resolve win-score-threshold 20." >&2; exit 1; }
+grep -q '"game.rules.probability.push-shift.II":20' "$shared_rules" \
+  || { echo "The shared config repository must resolve push-shift.II 20." >&2; exit 1; }
+[[ "$shared_digest" == "$(simulation_effective_rules_document_digest "$shared_rules")" ]] \
+  || { echo "The shared config repository's canonical digest must be stable." >&2; exit 1; }
 
 # A tampered effective digest fails clearly.
 sed -i "s#\"effectiveRulesDigest\": \"$expected_rules\"#\"effectiveRulesDigest\": \"$(printf '0%.0s' {1..64})\"#" "$digests_root/manifest.json"
 assert_failure_contains "effectiveRulesDigest" \
   run_validator "$digests_root"
+
+# A retained document edited after manifest generation fails as MANIFEST_MISMATCH.
+edited_root="$fixtures_dir/edited-document"
+setup_valid_deployment "$edited_root"
+sed -i 's#"game.rules.win-score-threshold":20#"game.rules.win-score-threshold":21#' "$edited_root/effective-rules.json"
+assert_failure_contains "MANIFEST_MISMATCH" \
+  run_validator "$edited_root"
+
+# A missing retained document fails clearly.
+missing_document_root="$fixtures_dir/missing-document"
+setup_valid_deployment "$missing_document_root"
+rm "$missing_document_root/effective-rules.json"
+assert_failure_contains "effective rules document not found" \
+  run_validator "$missing_document_root"
+
+# Two bundles with the same values in a different key order share one effective rules digest.
+order_a="$fixtures_dir/order-a"
+order_b="$fixtures_dir/order-b"
+setup_valid_deployment "$order_a"
+setup_valid_deployment "$order_b"
+cat > "$order_a/config-repo/game-service.yml" <<'EOF'
+game:
+  rules:
+    win-score-threshold: 20
+    scoring:
+      score-deltas:
+        EXPOSE_SIGNATURE_REVEALED: 2
+EOF
+cat > "$order_b/config-repo/game-service.yml" <<'EOF'
+game:
+  rules:
+    scoring:
+      score-deltas:
+        EXPOSE_SIGNATURE_REVEALED: 2
+    win-score-threshold: 20
+EOF
+for root in "$order_a" "$order_b"; do
+  SIMULATION_SERVICES_DIR="$root/services" \
+    SIMULATION_CONFIG_REPO="$root/config-repo" \
+    SIMULATION_CATALOG="$root/catalog.yml" \
+    SIMULATION_LANE="lane-a" \
+    SIMULATION_EXPERIMENT="exp-1" \
+    SIMULATION_CASE="case-1" \
+    JWT_ISSUER_URI="https://issuer.example" \
+    bash "$writer" "$root/manifest.json" >/dev/null
+done
+[[ "$(grep -o '"effectiveRulesDigest": "[^"]*"' "$order_a/manifest.json")" \
+  == "$(grep -o '"effectiveRulesDigest": "[^"]*"' "$order_b/manifest.json")" ]] \
+  || { echo "Key order must not change the effective rules digest." >&2; exit 1; }
+
+# Number spelling (2.0 vs 2) must not change the effective rules digest either.
+spelling_root="$fixtures_dir/spelling"
+setup_valid_deployment "$spelling_root"
+sed -i 's/^        II: 2.0$/        II: 2/' "$spelling_root/config-repo/application.yml"
+SIMULATION_SERVICES_DIR="$spelling_root/services" \
+  SIMULATION_CONFIG_REPO="$spelling_root/config-repo" \
+  SIMULATION_CATALOG="$spelling_root/catalog.yml" \
+  SIMULATION_LANE="lane-a" \
+  SIMULATION_EXPERIMENT="exp-1" \
+  SIMULATION_CASE="case-1" \
+  JWT_ISSUER_URI="https://issuer.example" \
+  bash "$writer" "$spelling_root/manifest.json" >/dev/null
+[[ "$(grep -o '"effectiveRulesDigest": "[^"]*"' "$order_a/manifest.json")" \
+  == "$(grep -o '"effectiveRulesDigest": "[^"]*"' "$spelling_root/manifest.json")" ]] \
+  || { echo "Number spelling must not change the effective rules digest." >&2; exit 1; }
+
+# A service disagreement fails with RULES_CONFLICT and writes no manifest.
+conflict_root="$fixtures_dir/conflict"
+setup_valid_deployment "$conflict_root"
+rm -f "$conflict_root/manifest.json" "$conflict_root/effective-rules.json"
+cat > "$conflict_root/config-repo/game-service.yml" <<'EOF'
+game:
+  rules:
+    win-score-threshold: 20
+    probability:
+      floor: 5
+    scoring:
+      score-deltas:
+        EXPOSE_SIGNATURE_REVEALED: 2
+EOF
+cat > "$conflict_root/config-repo/timeline-service.yml" <<'EOF'
+game:
+  rules:
+    probability:
+      floor: 0
+EOF
+conflict_output="$(
+  SIMULATION_SERVICES_DIR="$conflict_root/services" \
+    SIMULATION_CONFIG_REPO="$conflict_root/config-repo" \
+    SIMULATION_CATALOG="$conflict_root/catalog.yml" \
+    SIMULATION_LANE="lane-a" \
+    SIMULATION_EXPERIMENT="exp-1" \
+    SIMULATION_CASE="case-1" \
+    JWT_ISSUER_URI="https://issuer.example" \
+    bash "$writer" "$conflict_root/manifest.json" 2>&1
+)" && { echo "A cross-service rules conflict must fail manifest writing." >&2; exit 1; }
+[[ "$conflict_output" == *"RULES_CONFLICT"* ]] \
+  || { echo "The conflict must name RULES_CONFLICT." >&2; exit 1; }
+[[ "$conflict_output" == *"game.rules.probability.floor"* ]] \
+  || { echo "The conflict must name the offending key." >&2; exit 1; }
+[[ "$conflict_output" == *"game-service"* && "$conflict_output" == *"timeline-service"* ]] \
+  || { echo "The conflict must name both services." >&2; exit 1; }
+[[ ! -f "$conflict_root/manifest.json" && ! -f "$conflict_root/effective-rules.json" ]] \
+  || { echo "A refused conflict must write neither the manifest nor the rules document." >&2; exit 1; }
 
 # A bundle prepared with a different threshold has different effective rules digests.
 bundle_a="$fixtures_dir/bundle-a"
@@ -350,5 +488,24 @@ setup_valid_deployment "$missing_root"
 rm "$missing_root/manifest.json"
 assert_failure_contains "run scripts/write-simulation-manifest.sh" \
   run_validator "$missing_root"
+
+# The workbench lane declaration validates the retained document without Docker.
+provision_root="$fixtures_dir/provision"
+setup_valid_deployment "$provision_root"
+provision_digest="$(simulation_effective_rules_digest "$provision_root/config-repo")"
+provision_path="$provision_root/effective-rules.json"
+container_path="/etc/workbench/lanes/lane-a/effective-rules.json"
+[[ "$(workbench_lane_rules_document lane-a "$provision_path" "$container_path" "$provision_digest")" \
+  == "$container_path" ]] \
+  || { echo "The lane declaration must emit the workbench document path." >&2; exit 1; }
+
+rm "$provision_path"
+assert_failure_contains "lane lane-a: rules-document" \
+  workbench_lane_rules_document lane-a "$provision_path" "$container_path" "$provision_digest"
+
+setup_valid_deployment "$provision_root"
+sed -i 's#"game.rules.win-score-threshold":20#"game.rules.win-score-threshold":21#' "$provision_path"
+assert_failure_contains "lane lane-a: rules-document" \
+  workbench_lane_rules_document lane-a "$provision_path" "$container_path" "$provision_digest"
 
 echo "Simulation lane deployment validator fixtures passed."

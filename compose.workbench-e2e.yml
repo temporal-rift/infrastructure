@@ -89,6 +89,8 @@ services:
       SPRING_CONFIG_IMPORT: "optional:file:/etc/workbench/lanes.yml"
     volumes:
       - ./target/workbench-e2e/lanes.yml:/etc/workbench/lanes.yml:ro
+      # The retained EffectiveRules documents each lane declares as rules-document.
+      - ./simulation/lanes:/etc/workbench/lanes:ro
     depends_on:
       workbench-postgres:
         condition: service_healthy
