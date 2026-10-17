@@ -34,6 +34,7 @@ def fail(message):
 
 
 def load_yaml(path):
+    """Load a YAML mapping, returning an empty mapping for an empty file."""
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
     except OSError as error:
@@ -48,6 +49,7 @@ def load_yaml(path):
 
 
 def deep_merge(base, override):
+    """Merge one mapping over another recursively."""
     if not isinstance(base, dict) or not isinstance(override, dict):
         return override
     merged = dict(base)
@@ -59,15 +61,19 @@ def deep_merge(base, override):
     return merged
 
 
-def flatten(node, prefix, flattened):
+def flatten(node, prefix, flattened, service):
+    """Flatten a mapping into dotted leaf paths, rejecting colliding paths."""
     if isinstance(node, dict):
         for key, value in node.items():
-            flatten(value, f"{prefix}.{key}", flattened)
+            flatten(value, f"{prefix}.{key}", flattened, service)
     else:
+        if prefix in flattened:
+            fail(f"RULES_CONFLICT: multiple rule values resolve to {prefix} in {service}")
         flattened[prefix] = node
 
 
 def resolved_rules(config_repo, service):
+    """Return the game.rules leaves one service resolves."""
     shared = load_yaml(config_repo / "application.yml")
     own = load_yaml(config_repo / f"{service}.yml")
     game = deep_merge(shared, own).get("game", {})
@@ -77,11 +83,12 @@ def resolved_rules(config_repo, service):
     if not isinstance(rules, dict):
         fail(f"game.rules in {config_repo / f'{service}.yml'} must be a mapping")
     flattened = {}
-    flatten(rules, "game.rules", flattened)
+    flatten(rules, "game.rules", flattened, service)
     return flattened
 
 
 def assert_supported(key, value):
+    """Reject a value outside the EffectiveRules value grammar."""
     if isinstance(value, (bool, int, float, str)):
         return
     if isinstance(value, list):
@@ -93,6 +100,7 @@ def assert_supported(key, value):
 
 
 def canonical_number(value):
+    """Serialize a finite number as RFC 8785 / ECMAScript does."""
     if not math.isfinite(value):
         fail(f"UNSUPPORTED_RULES_VALUE: {value} is not a finite number")
     if value == 0:
@@ -121,6 +129,7 @@ def canonical_number(value):
 
 
 def canonical_json(value):
+    """Serialize a JSON value in RFC 8785 canonical form."""
     if value is None:
         return "null"
     if isinstance(value, bool):
@@ -142,11 +151,13 @@ def canonical_json(value):
 
 
 def effective_rules_digest(properties):
+    """Return the SHA-256 digest of canonical properties."""
     digest = hashlib.sha256(canonical_json(properties).encode("utf-8"))
     return digest.hexdigest()
 
 
 def resolve_properties(config_repo):
+    """Resolve every service view and merge the rules, rejecting conflicts."""
     per_service = {service: resolved_rules(config_repo, service) for service in SERVICES}
     by_key = {}
     for service, rules in per_service.items():
@@ -169,10 +180,12 @@ def resolve_properties(config_repo):
 
 
 def resolve_document(config_repo):
+    """Build the schemaVersion 1 EffectiveRules document."""
     return {"schemaVersion": 1, "properties": resolve_properties(config_repo)}
 
 
 def main():
+    """Run the resolver CLI."""
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 

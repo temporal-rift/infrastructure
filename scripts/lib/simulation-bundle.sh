@@ -18,8 +18,13 @@ simulation_file_digest() {
 
 # Prints a Python interpreter that can import PyYAML, or fails with the required dependency.
 simulation_python() {
+  local candidates=(python3 python)
+  # The Windows Store's python3 alias can block on an interactive prompt, while its python alias is real.
+  if [[ "${OS:-}" == "Windows_NT" ]]; then
+    candidates=(python py)
+  fi
   local candidate
-  for candidate in python3 python; do
+  for candidate in "${candidates[@]}"; do
     if command -v "$candidate" > /dev/null 2>&1 && "$candidate" -c 'import yaml' > /dev/null 2>&1; then
       printf '%s\n' "$candidate"
       return 0
