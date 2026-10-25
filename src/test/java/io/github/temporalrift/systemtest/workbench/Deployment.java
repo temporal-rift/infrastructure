@@ -17,7 +17,6 @@ final class Deployment {
     /** One isolated lane, as provisioned. */
     record Lane(
             String id,
-            String variant,
             String project,
             String gameUrl,
             String timelineUrl,
@@ -89,7 +88,6 @@ final class Deployment {
             lane.path("bots").forEach(bot -> bots.add(UUID.fromString(bot.asString())));
             lanes.add(new Lane(
                     lane.path("id").asString(),
-                    lane.path("variant").asString(),
                     lane.path("project").asString(),
                     lane.path("gameUrl").asString(),
                     lane.path("timelineUrl").asString(),
@@ -102,21 +100,17 @@ final class Deployment {
         return List.copyOf(lanes);
     }
 
-    List<Lane> lanes(String variant) {
-        return lanes().stream().filter(lane -> lane.variant().equals(variant)).toList();
-    }
-
-    /** A lane of a variant; every lane of one variant must serve the same bundle digests. */
-    Lane variantLane(String variant) {
-        var variantLanes = lanes(variant);
-        if (variantLanes.isEmpty()) {
-            throw new IllegalStateException("No lane serves variant " + variant);
+    /** The lane every lane equals: all lanes serve the baseline bundle, so they must agree on its digests. */
+    Lane baselineLane() {
+        var all = lanes();
+        if (all.isEmpty()) {
+            throw new IllegalStateException("The deployment has no lane");
         }
-        var first = variantLanes.getFirst();
-        variantLanes.forEach(lane -> {
+        var first = all.getFirst();
+        all.forEach(lane -> {
             if (!lane.rulesDigest().equals(first.rulesDigest())
                     || !lane.contentDigest().equals(first.contentDigest())) {
-                throw new IllegalStateException("Lanes of variant " + variant + " serve different bundles");
+                throw new IllegalStateException("Lanes serve different bundles");
             }
         });
         return first;

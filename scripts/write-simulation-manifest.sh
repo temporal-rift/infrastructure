@@ -102,6 +102,10 @@ if [[ "$simulation_control_game" != "$simulation_control_timeline" ]]; then
   echo "Cannot write manifest: incompatible simulation-control-api pins across the lane service set ($simulation_control_game vs $simulation_control_timeline): deploy one compatible control contract." >&2
   exit 1
 fi
+if [[ "$simulation_control_game" != "$simulation_control_api_required" ]]; then
+  echo "Cannot write manifest: incompatible simulation-control-api.version pin $simulation_control_game: a lane accepts only $simulation_control_api_required." >&2
+  exit 1
+fi
 simulation_control="$simulation_control_game"
 
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"

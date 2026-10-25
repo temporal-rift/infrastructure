@@ -142,7 +142,7 @@ write_lane_manifest() {
   "contracts": {
     "session-event": "7.0.0",
     "session-api": "3.0.0",
-    "simulation-control-api": "1.1.1"
+    "simulation-control-api": "2.0.0"
   },
   "configDigests": {
     "game-service.yml": "$(printf 'f%.0s' {1..64})"
@@ -191,7 +191,7 @@ grep -qF "lane wbe2e-4: services.timeline-service.image-digest" <<< "$error" \
 if command -v jq > /dev/null; then
   mkdir -p "$work/evidence"
   cat > "$work/evidence/core.json" <<'JSON'
-{"formatVersion":1,"suite":"core","lanes":[{"variant":"baseline"},{"variant":"candidate"}],"maxEras":2,"timingMode":"LOGICAL",
+{"formatVersion":1,"suite":"core","lanes":[{"id":"wbe2e-1"},{"id":"wbe2e-2"}],"maxEras":2,"timingMode":"LOGICAL",
  "matrixCounts":{"requested":220,"succeeded":218,"failed":2,"cancelled":0},"matrixRuntimeSeconds":7200,"matrixThroughputCasesPerHour":110.0,
  "reproduction":{"state":"MATCH","seconds":90},"redelivery":{"recordsRedelivered":500,"cases":3}}
 JSON

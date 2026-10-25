@@ -32,7 +32,7 @@ write_pom() {
     <scoring-api.version>2.0.1</scoring-api.version>
     <projection-api.version>10.0.0</projection-api.version>
     <chains-api.version>2.0.0</chains-api.version>
-    <simulation-control-api.version>1.1.1</simulation-control-api.version>
+    <simulation-control-api.version>2.0.0</simulation-control-api.version>
   </properties>
 $extra
 </project>
@@ -202,10 +202,55 @@ assert_failure_contains "incompatible timeline-event.version pins" \
 # A control-contract mismatch between the lane services fails clearly.
 control_mismatch_root="$fixtures_dir/control-mismatch"
 setup_valid_deployment "$control_mismatch_root"
-sed -i 's#<simulation-control-api.version>1.1.1</simulation-control-api.version>#<simulation-control-api.version>1.0.0</simulation-control-api.version>#' \
+sed -i 's#<simulation-control-api.version>2.0.0</simulation-control-api.version>#<simulation-control-api.version>1.0.0</simulation-control-api.version>#' \
   "$control_mismatch_root/services/timeline-service/pom.xml"
 assert_failure_contains "incompatible simulation-control-api.version pins" \
   run_validator "$control_mismatch_root"
+
+# Services pinning the previous control contract fail with the incompatible-pin error, with no Docker involved.
+old_pin_root="$fixtures_dir/old-control-pin"
+setup_valid_deployment "$old_pin_root"
+for service in game-service timeline-service; do
+  sed -i 's#<simulation-control-api.version>2.0.0</simulation-control-api.version>#<simulation-control-api.version>1.1.1</simulation-control-api.version>#' \
+  "$old_pin_root/services/$service/pom.xml"
+done
+assert_failure_contains "incompatible simulation-control-api.version pin 1.1.1" \
+  run_validator "$old_pin_root"
+old_pin_output="$(SIMULATION_SERVICES_DIR="$old_pin_root/services" SIMULATION_CONFIG_REPO="$old_pin_root/config-repo" \
+  SIMULATION_CATALOG="$old_pin_root/catalog.yml" SIMULATION_LANE=lane-a SIMULATION_EXPERIMENT=exp-1 \
+  SIMULATION_CASE=case-1 JWT_ISSUER_URI=https://issuer.example \
+  bash "$writer" "$old_pin_root/old-manifest.json" 2>&1)" \
+  && { echo "The manifest writer must refuse a 1.x control pin." >&2; exit 1; }
+[[ "$old_pin_output" == *"simulation-control-api.version"* ]] \
+  || { echo "The writer error must name simulation-control-api.version, got: $old_pin_output" >&2; exit 1; }
+
+# A lane that would start an observability service, trace, or run unbounded fails clearly.
+profile_root="$fixtures_dir/profile"
+setup_valid_deployment "$profile_root"
+sed '/^  zipkin:/,/^  [a-z-]*:$/ s#    profiles: \[observability\]##' \
+  "$repo_root/compose.simulation.yml" > "$profile_root/compose.yml"
+SIMULATION_COMPOSE_FILE="$profile_root/compose.yml" assert_failure_contains "observability profile" \
+  run_validator "$profile_root"
+
+tracing_root="$fixtures_dir/tracing"
+setup_valid_deployment "$tracing_root"
+sed 's#TRACING_SAMPLING_PROBABILITY: "0.0"#TRACING_SAMPLING_PROBABILITY: "1.0"#' \
+  "$repo_root/compose.simulation.yml" > "$tracing_root/compose.yml"
+SIMULATION_COMPOSE_FILE="$tracing_root/compose.yml" assert_failure_contains "tracing off" \
+  run_validator "$tracing_root"
+
+limit_root="$fixtures_dir/limit"
+setup_valid_deployment "$limit_root"
+sed '/^  postgres:/,/^  [a-z-]*:$/ s#^    mem_limit: .*##' \
+  "$repo_root/compose.simulation.yml" > "$limit_root/compose.yml"
+SIMULATION_COMPOSE_FILE="$limit_root/compose.yml" assert_failure_contains "postgres a memory limit" \
+  run_validator "$limit_root"
+
+readme_root="$fixtures_dir/readme"
+setup_valid_deployment "$readme_root"
+sed 's#^| `kafka` | [0-9]*m |#| `kafka` | 1m |#' "$repo_root/README.md" > "$readme_root/README.md"
+SIMULATION_README="$readme_root/README.md" assert_failure_contains "memory limit of kafka" \
+  run_validator "$readme_root"
 
 # Stale manifest fails clearly.
 stale_root="$fixtures_dir/stale"
@@ -498,19 +543,14 @@ collision_output="$(
 [[ ! -f "$collision_root/manifest.json" && ! -f "$collision_root/effective-rules.json" ]] \
   || { echo "A refused collision must write neither the manifest nor the rules document." >&2; exit 1; }
 
-# A bundle prepared with a different threshold has different effective rules digests.
+# Bundle preparation copies the baseline verbatim and offers no rules edits.
 bundle_a="$fixtures_dir/bundle-a"
-bundle_b="$fixtures_dir/bundle-b"
-bash "$script_dir/prepare-simulation-bundle.sh" --out "$bundle_a" --max-eras 2 --win-score-threshold 20 >/dev/null
-bash "$script_dir/prepare-simulation-bundle.sh" --out "$bundle_b" --max-eras 2 --win-score-threshold 22 >/dev/null
-[[ "$(simulation_effective_rules_digest "$bundle_a")" != "$(simulation_effective_rules_digest "$bundle_b")" ]] \
-  || { echo "Bundles with different thresholds must have different effective rules digests." >&2; exit 1; }
-grep -q 'win-score-threshold: 22' "$bundle_b/game-service.yml" \
-  || { echo "The candidate bundle must serve the edited threshold." >&2; exit 1; }
-if bash "$script_dir/prepare-simulation-bundle.sh" --out "$fixtures_dir/bundle-c" --max-eras 0 >/dev/null 2>&1; then
-  echo "A non-positive game length must be rejected." >&2
-  exit 1
-fi
+bash "$script_dir/prepare-simulation-bundle.sh" --out "$bundle_a" >/dev/null
+[[ "$(simulation_effective_rules_digest "$bundle_a")" == "$(simulation_effective_rules_digest "$repo_root/config-server/config-repo")" ]]   || { echo "The prepared bundle must carry the baseline effective rules." >&2; exit 1; }
+for option in "--win-score-threshold 22" "--max-eras 2"; do
+  # shellcheck disable=SC2086
+  assert_failure_contains "Unknown argument"     bash "$script_dir/prepare-simulation-bundle.sh" --out "$fixtures_dir/bundle-c" $option
+done
 
 # Missing manifest fails clearly.
 missing_root="$fixtures_dir/missing"

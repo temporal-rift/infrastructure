@@ -8,6 +8,9 @@
 
 simulation_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# The only simulation-control-api version a lane accepts: it opens and closes one execution context per game.
+simulation_control_api_required="2.0.0"
+
 simulation_file_digest() {
   if [[ -f "$1" ]]; then
     sha256sum "$1" | awk '{print $1}'

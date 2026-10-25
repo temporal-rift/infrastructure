@@ -6,9 +6,16 @@ name: temporal-rift-sim-${SIMULATION_LANE:?SIMULATION_LANE must be set to the la
 # loopback, and requires an issuer capable of minting deterministic bot, operator, and observer
 # identities. Local-dev behavior in compose.yml is untouched.
 #
-# A lane runs one logical case at a time; bounded concurrency uses independent lanes, each
-# started as its own Compose project with its own broker, databases, and volumes. Durable
-# workbench evidence lives outside the disposable lane project.
+# A lane plays any number of cases in sequence without restarting, each in its own execution
+# context opened and closed through the control operations; bounded concurrency uses independent
+# lanes, each started as its own Compose project with its own broker, databases, and volumes.
+# Durable workbench evidence lives outside the disposable lane project.
+#
+# A lane starts only what a game needs: PostgreSQL, Kafka, topic creation, the config server, and the
+# three services. The development observability services belong to the `observability` profile, which
+# no lane command enables, and the services export no traces. Every container has a memory limit and
+# every JVM a maximum heap; README.md states each value and the headroom above the measured peak, and
+# scripts/verify-simulation-deployment.sh checks that both agree with this file.
 #
 # Lifecycle (always scoped to the named lane project; never disturbs other stacks):
 #
@@ -20,6 +27,9 @@ name: temporal-rift-sim-${SIMULATION_LANE:?SIMULATION_LANE must be set to the la
 #   bash scripts/check-simulation-readiness.sh  # once the lane is up, before gameplay
 #   docker compose -p temporal-rift-sim-$SIMULATION_LANE -f compose.yml -f compose.simulation.yml up --build -d
 #   docker compose -p temporal-rift-sim-$SIMULATION_LANE -f compose.yml -f compose.simulation.yml down -v --remove-orphans
+#
+# scripts/recycle-simulation-lane.sh is recovery for a lane whose services are unhealthy or whose
+# execution context cannot be closed; it is not part of playing a case.
 #
 # The lane always uses logical time driven through the control operations; there is no
 # accelerated wall-clock preset to label. The manifest records timingMode=LOGICAL for every lane.
@@ -36,6 +46,7 @@ x-simulation-lane-labels: &simulation-lane-labels
 services:
   postgres:
     ports: !override []
+    mem_limit: 512m
     labels:
       <<: *simulation-lane-labels
 
@@ -48,35 +59,54 @@ services:
   # scripts/verify-simulation-deployment.sh as a contract, not applied at startup.
   kafka:
     ports: !override []
+    mem_limit: 1024m
+    environment:
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
     labels:
       <<: *simulation-lane-labels
 
+  kafka-topics:
+    mem_limit: 256m
+    environment:
+      KAFKA_HEAP_OPTS: "-Xmx128m"
+
+  # Development observability, kept out of every lane: no lane command enables this profile.
   kafka-ui:
+    profiles: [observability]
     ports: !override []
 
   zipkin:
+    profiles: [observability]
     ports: !override []
 
   kafka-exporter:
+    profiles: [observability]
     ports: !override []
 
   # The lane serves its own frozen bundle: SIMULATION_CONFIG_REPO names the directory whose digests the
   # lane manifest records. It defaults to the shared config repository.
   config-server:
     ports: !override []
+    mem_limit: 512m
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xmx256m"
     volumes:
       - "${SIMULATION_CONFIG_REPO:-./config-server/config-repo}:/config:ro"
 
   victorialogs:
+    profiles: [observability]
     ports: !override []
 
   victoriametrics:
+    profiles: [observability]
     ports: !override []
 
   alertmanager:
+    profiles: [observability]
     ports: !override []
 
   vmalert:
+    profiles: [observability]
     ports: !override []
 
   # Lanes authenticate against the configured issuer, which must be able to mint the
@@ -86,6 +116,9 @@ services:
     profiles: [local-issuer]
 
   game-service:
+    mem_limit: 768m
+    logging: !override
+      driver: json-file
     ports: !override
       - "127.0.0.1:${SIMULATION_GAME_PORT:-18180}:8080"
     labels:
@@ -94,10 +127,18 @@ services:
       GAME_SIMULATION_ENABLED: "true"
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+      TRACING_SAMPLING_PROBABILITY: "0.0"
+      ZIPKIN_TRACING_ENDPOINT: !reset null
     depends_on:
       identity-provider: !reset null
+      zipkin: !reset null
+      victorialogs: !reset null
 
   timeline-service:
+    mem_limit: 768m
+    logging: !override
+      driver: json-file
     ports: !override
       - "127.0.0.1:${SIMULATION_TIMELINE_PORT:-18181}:8080"
     labels:
@@ -106,10 +147,18 @@ services:
       GAME_SIMULATION_ENABLED: "true"
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+      TRACING_SAMPLING_PROBABILITY: "0.0"
+      ZIPKIN_TRACING_ENDPOINT: !reset null
     depends_on:
       identity-provider: !reset null
+      zipkin: !reset null
+      victorialogs: !reset null
 
   read-service:
+    mem_limit: 768m
+    logging: !override
+      driver: json-file
     ports: !override
       - "127.0.0.1:${SIMULATION_READ_PORT:-18182}:8080"
     labels:
@@ -119,5 +168,10 @@ services:
     environment:
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
+      JAVA_TOOL_OPTIONS: "-Xmx512m"
+      TRACING_SAMPLING_PROBABILITY: "0.0"
+      ZIPKIN_TRACING_ENDPOINT: !reset null
     depends_on:
       identity-provider: !reset null
+      zipkin: !reset null
+      victorialogs: !reset null

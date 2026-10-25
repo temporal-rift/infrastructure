@@ -245,9 +245,7 @@ class WorkbenchMilestoneIT {
         assertThat(listed)
                 .as("the served bundles are exactly the provisioned ones")
                 .containsExactlyInAnyOrderElementsOf(provisioned);
-        assertThat(deployment.variantLane(Manifests.BASELINE).rulesDigest())
-                .as("the two variants serve different rules bundles")
-                .isNotEqualTo(deployment.variantLane(Manifests.CANDIDATE).rulesDigest());
+        assertThat(provisioned).as("every lane serves the baseline bundle").hasSize(1);
     }
 
     @Test
@@ -453,7 +451,7 @@ class WorkbenchMilestoneIT {
                 .pollInterval(Duration.ofSeconds(3))
                 .until(() -> Workbench.orFalse(() -> {
                     for (var running : designer.caseSummaries(runId, "RUNNING", Manifests.CANDIDATE)) {
-                        for (var lane : deployment.lanes(Manifests.CANDIDATE)) {
+                        for (var lane : deployment.lanes()) {
                             var checkpoint = Http.get(lane.gameUrl() + "/internal/simulation/v1/checkpoint", control);
                             if (checkpoint.status() == 200
                                     && running.path("caseKey")
@@ -791,6 +789,52 @@ class WorkbenchMilestoneIT {
     }
 
     @Test
+    @Order(11)
+    void aLanePlaysCasesOfDifferentVariantsInSequenceWithoutRecycling() {
+        var spec = new Manifests.Spec(
+                "sequence " + deployment.runId(),
+                List.of(Manifests.BASELINE, Manifests.CANDIDATE),
+                List.of("400"),
+                List.of(3),
+                List.of(List.of("ERASERS", "PROPHETS", "WEAVERS")),
+                List.of(Manifests.RANDOM),
+                1,
+                CASE_TIMEOUT_SECONDS);
+        var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
+        var startedBefore = laneServiceStarts();
+
+        var runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
+                .path("runId")
+                .asString();
+        var run = designer.awaitRun(runId, Workbench::isFinal, FIXTURE_TIMEOUT, "the two sequential cases to finish");
+
+        assertThat(run.path("counts").path("succeeded").asInt())
+                .as("both variants play to success: %s", run)
+                .isEqualTo(2);
+        assertThat(designer.caseSummaries(runId, null, null).stream()
+                        .map(summary -> summary.path("variantLabel").asString())
+                        .distinct())
+                .containsExactlyInAnyOrder(Manifests.BASELINE, Manifests.CANDIDATE);
+        assertThat(laneServiceStarts())
+                .as("no lane service restarted while the cases played")
+                .isEqualTo(startedBefore);
+    }
+
+    /** When each lane's game, timeline and read service container last started. */
+    private Map<String, String> laneServiceStarts() {
+        var starts = new LinkedHashMap<String, String>();
+        for (var lane : deployment.lanes()) {
+            for (var service : List.of("game-service", "timeline-service", "read-service")) {
+                var id = Docker.run("compose", "-p", lane.project(), "ps", "-q", service).strip();
+                starts.put(
+                        lane.id() + "/" + service,
+                        Docker.run("inspect", "--format", "{{.State.StartedAt}}", id).strip());
+            }
+        }
+        return starts;
+    }
+
+    @Test
     @Order(10)
     void redeliveredEventRecordsDoNotChangeAGameOrDuplicateEvidence() throws Exception {
         var spec = new Manifests.Spec(
@@ -805,9 +849,7 @@ class WorkbenchMilestoneIT {
         var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
 
         var duplicators = new ArrayList<KafkaDuplicator>();
-        deployment
-                .lanes(Manifests.BASELINE)
-                .forEach(lane -> duplicators.add(new KafkaDuplicator(lane.kafkaBootstrap())));
+        deployment.lanes().forEach(lane -> duplicators.add(new KafkaDuplicator(lane.kafkaBootstrap())));
         String runId;
         try {
             runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
