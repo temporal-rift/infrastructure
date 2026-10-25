@@ -825,10 +825,12 @@ class WorkbenchMilestoneIT {
         var starts = new LinkedHashMap<String, String>();
         for (var lane : deployment.lanes()) {
             for (var service : List.of("game-service", "timeline-service", "read-service")) {
-                var id = Docker.run("compose", "-p", lane.project(), "ps", "-q", service).strip();
+                var id = Docker.run("compose", "-p", lane.project(), "ps", "-q", service)
+                        .strip();
                 starts.put(
                         lane.id() + "/" + service,
-                        Docker.run("inspect", "--format", "{{.State.StartedAt}}", id).strip());
+                        Docker.run("inspect", "--format", "{{.State.StartedAt}}", id)
+                                .strip());
             }
         }
         return starts;
