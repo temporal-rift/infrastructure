@@ -86,9 +86,30 @@ service_block() {
   ' "$2"
 }
 
-for service in postgres kafka kafka-ui zipkin kafka-exporter config-server victorialogs victoriametrics alertmanager vmalert; do
+observability_services="kafka-ui zipkin kafka-exporter victorialogs victoriametrics alertmanager vmalert"
+
+for service in postgres kafka config-server $observability_services; do
   service_block "$service" "$compose_file" | grep -q "ports: !override \[\]" \
     || fail "$compose_file must unpublish the $service host ports (ports: !override []) so lane traffic stays on the lane's own service ports."
+done
+
+# A lane starts only what a game needs: the development observability services sit behind a profile no lane
+# command enables, and the lane services neither depend on them nor export traces.
+for service in $observability_services; do
+  service_block "$service" "$compose_file" | grep -q "profiles: \[observability\]" \
+    || fail "$compose_file must assign $service to the observability profile: a lane starts only what a game needs."
+done
+
+for service in game-service timeline-service read-service; do
+  block="$(service_block "$service" "$compose_file")"
+  grep -q 'TRACING_SAMPLING_PROBABILITY: "0.0"' <<< "$block" \
+    || fail "$compose_file must turn tracing off on $service (TRACING_SAMPLING_PROBABILITY: \"0.0\"): lane services export no traces."
+  grep -q 'ZIPKIN_TRACING_ENDPOINT: !reset null' <<< "$block" \
+    || fail "$compose_file must remove the $service trace exporter endpoint (ZIPKIN_TRACING_ENDPOINT: !reset null)."
+  for dependency in zipkin victorialogs; do
+    grep -q "$dependency: !reset null" <<< "$block" \
+      || fail "$compose_file must drop the $service dependency on $dependency: the lane does not start it."
+  done
 done
 
 for service in game-service timeline-service; do
@@ -148,6 +169,24 @@ if echo "$grant_lines" | grep -q '\*'; then
   fail "$acls_script must not contain wildcard broker grants: every lane grant names its topic or group."
 fi
 
+# --- Memory limits ---
+# Every container a lane starts has a memory limit, and the README states the same value.
+
+readme_file="${SIMULATION_README:-$repo_root/README.md}"
+observer_file="${SIMULATION_OBSERVER_COMPOSE_FILE:-$repo_root/compose.simulation-observer.yml}"
+[[ -f "$readme_file" ]] || fail "README not found: $readme_file."
+
+for service in postgres kafka kafka-topics config-server game-service timeline-service read-service kafka-observer; do
+  source_file="$compose_file"
+  [[ "$service" == "kafka-observer" ]] && source_file="$observer_file"
+  [[ -f "$source_file" ]] || fail "lane overlay not found: $source_file."
+  limit="$(service_block "$service" "$source_file" | sed -n 's/^    mem_limit: *\([0-9]*m\) *$/\1/p')"
+  [[ -n "$limit" ]] \
+    || fail "$source_file must give $service a memory limit (mem_limit: <n>m): every container a lane starts is bounded."
+  grep -qE "^\| \`$service\` \| $limit \|" "$readme_file" \
+    || fail "$readme_file must state the $limit memory limit of $service in the lane memory table."
+done
+
 # --- Contract compatibility across the lane service set ---
 
 pom_version() {
@@ -183,6 +222,9 @@ check_shared_pin "session-event.version" "$game_pom" "$timeline_pom" "$read_pom"
 check_shared_pin "action-event.version" "$game_pom" "$timeline_pom" "$read_pom"
 check_shared_pin "scoring-event.version" "$game_pom" "$read_pom"
 check_shared_pin "simulation-control-api.version" "$game_pom" "$timeline_pom"
+control_pin="$(pom_version "$game_pom" "simulation-control-api.version")"
+[[ "$control_pin" == "$simulation_control_api_required" ]] \
+  || fail "incompatible simulation-control-api.version pin $control_pin in $game_pom: a lane accepts only $simulation_control_api_required, which opens one execution context per game."
 
 # --- Manifest freshness ---
 

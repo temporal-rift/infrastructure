@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Returns one used simulation lane to a clean, ready state: removes only that lane's own Compose
+# Recovery for a simulation lane whose services are unhealthy or whose execution context cannot be closed; a
+# lane plays any number of cases without it. Returns the lane to a clean, ready state: removes only that lane's own Compose
 # project (containers, networks, volumes) and starts it again from the images it already has.
 # Answers success only once the lane's services report healthy.
 #

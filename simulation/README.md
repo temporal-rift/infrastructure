@@ -1,9 +1,9 @@
 # Simulation lanes
 
 An isolated simulation lane is one game-service, timeline-service, and read-service
-deployment running one logical case at a time against real services with independent
-PostgreSQL databases, broker topics, identities, and frozen configuration. Bounded
-concurrency uses independent lanes. Durable workbench evidence lives outside the
+deployment playing any number of cases in sequence, each in its own execution context,
+against real services with independent PostgreSQL databases, broker topics, identities,
+and frozen configuration. Bounded concurrency uses independent lanes. Durable workbench evidence lives outside the
 disposable lane project.
 
 ## Prerequisites
@@ -126,8 +126,9 @@ never appears on the shared network (it would resolve to every lane's broker). S
 ## Configuration bundles
 
 A lane serves exactly one bundle: the directory named by `SIMULATION_CONFIG_REPO` (default the shared config
-repository), mounted into that lane's config server. `scripts/prepare-simulation-bundle.sh --out DIR [--max-eras N]
-[--win-score-threshold T]` makes a variant, failing if a requested edit matches nothing.
+repository), mounted into that lane's config server. `scripts/prepare-simulation-bundle.sh --out DIR` copies the
+baseline verbatim and accepts no other option: every lane serves the baseline, and a rules variant is defined as
+overrides in the workbench and carried by each case's execution context.
 
 The manifest writer resolves every `game.rules.*` leaf for each service by layering
 `game-service.yml`, `timeline-service.yml`, or `read-service.yml` over `application.yml`, flattens nested maps with
@@ -157,7 +158,9 @@ from the bundles the workbench lists at `GET /api/v1/lane-bundles`.
 
 ## Recycling a used lane
 
-A lane accepts only one execution context for its lifetime. `scripts/recycle-simulation-lane.sh <lane-env-file>`
+A lane plays any number of cases in sequence, so recycling is not part of playing a case. It is recovery for a lane
+whose services are unhealthy or whose execution context cannot be closed.
+`scripts/recycle-simulation-lane.sh <lane-env-file>`
 removes that lane's own project (`down -v`) and starts it again from the images it has, answering only after the
 services are healthy; the env file holds the same `SIMULATION_*` variables the lane was provisioned with. Nothing outside
 the named project is touched.

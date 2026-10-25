@@ -65,6 +65,7 @@ jobs:
           bash scripts/test-check-simulation-readiness.sh
           bash scripts/test-workbench-e2e-scripts.sh
           bash scripts/test-recycle-simulation-lane.sh
+          bash scripts/test-check-simulation-memory-limits.sh
 
       - name: Build and analyze
         env:

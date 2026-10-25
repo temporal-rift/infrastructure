@@ -70,6 +70,7 @@ services:
   # Forwards the shared network's observer address to the lane broker's observer listener (TCP only).
   kafka-observer:
     image: nginx:1.27-alpine
+    mem_limit: 32m
     volumes:
       - ./simulation/kafka-observer.nginx.conf:/etc/nginx/nginx.conf:ro
     labels:

@@ -46,7 +46,6 @@ final class Evidence {
         deployment.lanes().forEach(lane -> {
             var node = lanes.addObject();
             node.put("id", lane.id());
-            node.put("variant", lane.variant());
             node.put("rulesDigest", lane.rulesDigest());
             node.put("contentDigest", lane.contentDigest());
         });

@@ -420,7 +420,9 @@ docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml 
 ## Isolated simulation lanes
 
 `compose.simulation.yml` is an overlay over `compose.yml` that provides one isolated,
-reproducible execution lane per case: game-service and timeline-service run with their
+reproducible execution lane that plays any number of cases in sequence, each in its own execution context
+carrying its rules (`simulation-control-api` 2.0.0 opens and closes one per game, so the lane never restarts
+between cases): game-service and timeline-service run with their
 isolated execution mode enabled (`GAME_SIMULATION_ENABLED=true`), every resource is
 scoped to the task-owned `temporal-rift-sim-<lane>` project with lane/experiment/case
 labels, and only the lane's service ports are published on loopback. Bots use the normal
@@ -442,6 +444,32 @@ drained on the same bundle plus downstream watermark observation before gameplay
 Teardown removes only the named lane project; durable workbench evidence lives outside
 it. See `simulation/README.md` for the exact provision, readiness, cancellation, and
 validation commands.
+
+A lane starts only what a game needs: PostgreSQL, Kafka, topic creation, the config server and game-service,
+timeline-service and read-service. kafka-ui, zipkin, kafka-exporter, victorialogs, victoriametrics, alertmanager and
+vmalert belong to the Compose profile `observability`, which no lane command enables (the development stack, started
+with `compose.yml` alone, is unchanged), and the lane services export no traces (sampling probability 0, no exporter
+endpoint). Every lane serves the baseline configuration bundle; a rules variant is defined as overrides in the
+workbench. `scripts/recycle-simulation-lane.sh` is recovery for a lane whose services are unhealthy or whose
+execution context cannot be closed; playing a case never needs it.
+
+### Lane memory limits
+
+Every container a lane starts has a memory limit and every JVM a maximum heap. Each limit is the container's peak
+memory measured on the light lane while the workbench E2E plays its cases, plus 25% headroom, rounded up to 32 MiB;
+`scripts/check-simulation-memory-limits.sh <resource-samples-file>` recomputes that from the run's resource samples and
+fails when a limit differs. `verify-simulation-deployment.sh` fails when a limit here differs from the overlay.
+
+| Container | Limit | JVM max heap | Measured peak (MiB) |
+|---|---|---|---|
+| `postgres` | 512m | n/a | pending first measured run |
+| `kafka` | 1024m | 512m | pending first measured run |
+| `kafka-topics` | 256m | 128m | pending first measured run |
+| `config-server` | 512m | 256m | pending first measured run |
+| `game-service` | 768m | 512m | pending first measured run |
+| `timeline-service` | 768m | 512m | pending first measured run |
+| `read-service` | 768m | 512m | pending first measured run |
+| `kafka-observer` | 32m | n/a | pending first measured run |
 
 ```bash
 export SIMULATION_LANE=<lane> SIMULATION_EXPERIMENT=<experiment> SIMULATION_CASE=<case>
@@ -566,15 +594,18 @@ suite instead shows decisions depend only on participant views by reproducing di
   (`designer` has read, write and observe scopes) and client-credentials tokens for the operator and the deterministic
   bot identities;
 - N lanes (`temporal-rift-sim-wbe2e-<n>`, default 2), each `compose.yml` + `compose.simulation.yml` +
-  `compose.simulation-observer.yml`, half serving the `baseline` configuration bundle and half the `candidate` one
-  (`scripts/prepare-simulation-bundle.sh`: the same game length, win score threshold 20 vs 22). Each lane manifest
+  `compose.simulation-observer.yml`, every one serving the `baseline` configuration bundle
+  (`scripts/prepare-simulation-bundle.sh` copies it verbatim; the harness defines the `candidate` variant as a win
+  score threshold 22 override of the baseline rules). Each lane manifest
   records its bundle's `effectiveRulesDigest`, `rulesArtifactDigest` and `effectiveContentDigest`, and retains the
   canonical `effective-rules.json` beside it;
 - an ordinary deployment (`temporal-rift-wbe2e-ordinary`) without simulation mode;
 - the workbench stack (`temporal-rift-workbench-e2e`): the workbench, its database and a lane recycler.
 
-A lane hosts a single case for its lifetime, so the workbench calls the recycler's `POST /lanes/{lane}/reset` after each
-case; `scripts/recycle-simulation-lane.sh` removes only that lane's project and starts it again. The workbench
+A lane plays any number of cases in sequence, each in its own execution context carrying its rules, so no case
+recycles it. The recycler's `POST /lanes/{lane}/reset` and `scripts/recycle-simulation-lane.sh` (which removes only that
+lane's project and starts it again) are recovery for a lane whose services are unhealthy or whose context cannot be
+closed. The workbench
 consumes per-lane broker addresses, served bundle digests, the lane's `rules-document`, and the reset hook as lane
 configuration (`workbench.execution.lanes[]`), written to `target/workbench-e2e/lanes.yml` together with the lane
 credentials, which never enter evidence. The lane manifest directory is mounted read-only at `/etc/workbench/lanes`,
@@ -597,7 +628,7 @@ docker rm -f wbe2e-protected-decoy   # the access suite leaves its lookalike for
 `DesignerJourneyIT` also needs Chromium (`mvn exec:java -Dexec.mainClass=com.microsoft.playwright.CLI
 -Dexec.classpathScope=test -Dexec.args="install chromium"`). Suite sizes are system properties
 (`workbenchE2e.recovery.cases`, `workbenchE2e.recovery.interruptAfter`, `workbenchE2e.matrixTimeoutMinutes`, ...). A
-full run is long: every case is a real game plus a lane recycle, so measure before relying on any size.
+full run is long: every case is a real game, so measure before relying on any size.
 
 ### Evidence and measurements
 

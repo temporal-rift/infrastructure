@@ -22,7 +22,7 @@ for file in "$evidence_dir"/*.json; do
   suite="$(basename "$file" .json)"
   echo "### Suite: $suite"
   jq -r '
-    "- Lanes: \(.lanes | length) (\([.lanes[].variant] | group_by(.) | map("\(.[0]) \(length)") | join(", ")))",
+    "- Lanes: \(.lanes | length), all serving the baseline bundle",
     "- Game length served: \(.maxEras) eras, timing mode \(.timingMode)",
     (if .matrixCounts then "- Seed-42 matrix: \(.matrixCounts.requested) requested, \(.matrixCounts.succeeded) succeeded, \(.matrixCounts.failed) failed, \(.matrixCounts.cancelled) cancelled in \(.matrixRuntimeSeconds) s (\(.matrixThroughputCasesPerHour) cases/hour)" else empty end),
     (if .reproduction then "- Reproduction: \(.reproduction.state) in \(.reproduction.seconds) s" else empty end),

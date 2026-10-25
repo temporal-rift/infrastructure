@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Provisions the deployed simulation workbench E2E (infrastructure#108): the issuer and shared network, N
-# isolated simulation lanes split between two configuration bundles, an ordinary deployment, the lane
-# recycler and the workbench itself. Writes the non-secret deployment descriptor the test harness reads
+# isolated simulation lanes that all serve the baseline configuration bundle, an ordinary deployment, the lane
+# recycler (recovery only) and the workbench itself. Writes the non-secret deployment descriptor the test harness reads
 # (target/workbench-e2e/deployment.json) and the workbench's runtime lane configuration with the lane
 # credentials (target/workbench-e2e/lanes.yml, never retained as evidence).
 #
@@ -11,9 +11,8 @@
 # of this repository, and MAVEN_SETTINGS (Maven settings with a `github` server entry) for the image builds.
 #
 # Optional environment:
-#   WORKBENCH_E2E_LANES     Number of lanes, even and at least 2 (default 2). Lanes 1..N/2 serve the
-#                           baseline bundle, the rest the candidate bundle.
-#   WORKBENCH_E2E_MAX_ERAS  Game length served by both bundles (default 2).
+#   WORKBENCH_E2E_LANES     Number of lanes, at least 1 (default 2). Every lane serves the baseline bundle;
+#                           rules variants are overrides the workbench applies per case.
 #   WORKBENCH_E2E_RUN_ID    Attribution recorded on every lane (default local).
 set -euo pipefail
 
@@ -28,14 +27,13 @@ source "$script_dir/lib/simulation-bundle.sh"
 source "$script_dir/lib/workbench-lane-declaration.sh"
 
 lanes="${WORKBENCH_E2E_LANES:-2}"
-max_eras="${WORKBENCH_E2E_MAX_ERAS:-2}"
 run_id="${WORKBENCH_E2E_RUN_ID:-local}"
 out="$repo_root/target/workbench-e2e"
 
 fail() { echo "Workbench E2E provisioning failed: $1" >&2; exit 1; }
 
-[[ "$lanes" =~ ^[0-9]+$ && "$lanes" -ge 2 && $((lanes % 2)) -eq 0 ]] \
-  || fail "WORKBENCH_E2E_LANES must be an even number of at least 2, got '$lanes'."
+[[ "$lanes" =~ ^[0-9]+$ && "$lanes" -ge 1 ]] \
+  || fail "WORKBENCH_E2E_LANES must be a number of at least 1, got '$lanes'."
 for dir in game-service timeline-service read-service simulation-workbench; do
   [[ -d "$workspace/$dir" ]] || fail "sibling checkout not found: $workspace/$dir."
 done
@@ -49,9 +47,10 @@ cd "$repo_root"
 rm -rf "$out"
 mkdir -p "$out/lanes" "$out/bundles"
 
-echo "== Preparing configuration bundles"
-bash scripts/prepare-simulation-bundle.sh --out "$out/bundles/baseline" --max-eras "$max_eras" --win-score-threshold 20
-bash scripts/prepare-simulation-bundle.sh --out "$out/bundles/candidate" --max-eras "$max_eras" --win-score-threshold 22
+echo "== Preparing the baseline configuration bundle"
+bash scripts/prepare-simulation-bundle.sh --out "$out/bundles/baseline"
+max_eras="$(sed -n 's/^    max-eras: *\([0-9]*\).*/\1/p' "$out/bundles/baseline/application.yml")"
+[[ -n "$max_eras" ]] || fail "the baseline bundle declares no game.rules.max-eras."
 
 stack=(docker compose -p "$workbench_e2e_project" -f compose.workbench-e2e.yml)
 
@@ -76,8 +75,6 @@ digest_of() {
 echo "== Writing lane manifests"
 for k in $(seq 1 "$lanes"); do
   lane="${workbench_e2e_lane_prefix}$k"
-  variant=baseline
-  [[ "$k" -gt $((lanes / 2)) ]] && variant=candidate
   cat > "$(lane_env "$lane")" <<ENV
 SIMULATION_LANE=$lane
 SIMULATION_EXPERIMENT=workbench-e2e-$run_id
@@ -89,9 +86,8 @@ SIMULATION_GAME_PORT=$((18100 + 10 * k))
 SIMULATION_TIMELINE_PORT=$((18101 + 10 * k))
 SIMULATION_READ_PORT=$((18102 + 10 * k))
 SIMULATION_KAFKA_PORT=$((18103 + 10 * k))
-SIMULATION_CONFIG_REPO=$out/bundles/$variant
+SIMULATION_CONFIG_REPO=$out/bundles/baseline
 SIMULATION_IMAGE_TAG=wbe2e
-SIMULATION_VARIANT=$variant
 ENV
   (
     set -a
@@ -204,8 +200,7 @@ echo "== Writing the deployment descriptor"
   printf '  "lanes": [\n'
   for k in $(seq 1 "$lanes"); do
     lane="${workbench_e2e_lane_prefix}$k"
-    printf '    {"id": "%s", "variant": "%s", "project": "%s", ' "$lane" \
-      "$([[ "$k" -gt $((lanes / 2)) ]] && echo candidate || echo baseline)" "$(workbench_e2e_lane_project "$lane")"
+    printf '    {"id": "%s", "project": "%s", ' "$lane" "$(workbench_e2e_lane_project "$lane")"
     printf '"gameUrl": "http://127.0.0.1:%s", "timelineUrl": "http://127.0.0.1:%s", "readUrl": "http://127.0.0.1:%s", "kafkaBootstrap": "127.0.0.1:%s", ' \
       "$((18100 + 10 * k))" "$((18101 + 10 * k))" "$((18102 + 10 * k))" "$((18103 + 10 * k))"
     printf '"manifest": "simulation/lanes/%s/manifest.json", "rulesDigest": "%s", "contentDigest": "%s", "bots": [' \

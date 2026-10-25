@@ -47,11 +47,36 @@ final class Workbench {
         return get("/api/v1/lane-bundles").requireStatus(200).json().path("items");
     }
 
+    /** Applies and validates a variant's overrides on a baseline rules document without persisting anything. */
+    @FunctionalInterface
+    interface VariantRules {
+        JsonNode preview(JsonNode rulesArtifact, int parameterSpaceVersion, Map<String, Number> overrides);
+    }
+
     /** What the workbench offers a designer to cite in a manifest. */
-    record Catalog(JsonNode policies, JsonNode laneBundles) {}
+    record Catalog(JsonNode policies, JsonNode laneBundles, VariantRules variantRules) {
+
+        Catalog(JsonNode policies, JsonNode laneBundles) {
+            this(policies, laneBundles, (rulesArtifact, version, overrides) -> {
+                throw new UnsupportedOperationException("This catalog previews no variant rules");
+            });
+        }
+    }
 
     Catalog catalog() {
-        return new Catalog(policies(), laneBundles());
+        return new Catalog(policies(), laneBundles(), this::previewVariantRules);
+    }
+
+    /** The rules, their digest and the normalised overrides that freezing a variant would store. */
+    JsonNode previewVariantRules(JsonNode rulesArtifact, int parameterSpaceVersion, Map<String, Number> overrides) {
+        var body = Http.JSON.createObjectNode();
+        body.set("rulesArtifact", rulesArtifact.deepCopy());
+        body.put("parameterSpaceVersion", parameterSpaceVersion);
+        var node = body.putObject("overrides");
+        overrides.forEach((key, value) -> node.put(key, value.doubleValue()));
+        return post("/api/v1/variant-rules-previews", body, null)
+                .requireStatus(200)
+                .json();
     }
 
     JsonNode createExperiment(JsonNode manifest, UUID key) {

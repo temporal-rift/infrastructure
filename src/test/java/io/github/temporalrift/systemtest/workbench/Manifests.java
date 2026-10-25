@@ -2,6 +2,7 @@ package io.github.temporalrift.systemtest.workbench;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -13,6 +14,10 @@ final class Manifests {
     static final List<String> FACTIONS = List.of("ERASERS", "PROPHETS", "REVISIONISTS", "WEAVERS", "ACTIVISTS");
     static final String BASELINE = "baseline";
     static final String CANDIDATE = "candidate";
+    /** The candidate variant: the baseline with a higher win score threshold, defined as overrides, not a bundle. */
+    static final Map<String, Number> CANDIDATE_OVERRIDES = Map.of("game.rules.win-score-threshold", 22);
+
+    static final int PARAMETER_SPACE_VERSION = 1;
     static final String RANDOM = "random-v1";
     static final String GREEDY = "faction-greedy-v1";
 
@@ -65,20 +70,25 @@ final class Manifests {
         var variants = manifest.putArray("variants");
         JsonNode provenance = null;
         for (var label : spec.variants()) {
-            var lane = deployment.variantLane(label);
+            var lane = deployment.baselineLane();
             var bundle = servedBundle(catalog.laneBundles(), lane);
             var variant = variants.addObject();
             variant.put("label", label);
             variant.set("rulesArtifact", bundle.path("rulesArtifact").deepCopy());
             variant.set("contentArtifact", bundle.path("contentArtifact").deepCopy());
-            variant.put("effectiveRulesDigest", lane.rulesDigest());
             variant.put("effectiveContentDigest", lane.contentDigest());
+            if (CANDIDATE.equals(label)) {
+                var preview = catalog.variantRules()
+                        .preview(bundle.path("rulesArtifact"), PARAMETER_SPACE_VERSION, CANDIDATE_OVERRIDES);
+                variant.put("effectiveRulesDigest", preview.path("effectiveRulesDigest").asString());
+                variant.put("parameterSpaceVersion", PARAMETER_SPACE_VERSION);
+                variant.set("overrides", preview.path("overrides").deepCopy());
+            } else {
+                variant.put("effectiveRulesDigest", lane.rulesDigest());
+            }
             var served = JSON.createObjectNode();
             served.set("services", bundle.path("services"));
             served.set("contracts", bundle.path("contracts"));
-            if (provenance != null && !provenance.equals(served)) {
-                throw new IllegalStateException("The served bundles of the variants declare different provenance");
-            }
             provenance = served;
         }
         if (provenance == null) {
