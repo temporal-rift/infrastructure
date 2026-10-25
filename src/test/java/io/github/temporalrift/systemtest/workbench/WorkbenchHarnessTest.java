@@ -29,15 +29,16 @@ class WorkbenchHarnessTest {
                "bots":["00000000-0000-4000-8000-000000000002"]}]}
             """.formatted("a".repeat(64), "c".repeat(64), "a".repeat(64), "c".repeat(64));
 
-    private static final String LANE_BUNDLES = """
+    private static final String LANE_BUNDLES =
+            """
             [{"rulesArtifact":{"digest":"%s"},"contentArtifact":{"digest":"%s","name":"base"},
               "effectiveRulesDigest":"%s","effectiveContentDigest":"%s",
               "services":{"gameService":{"imageDigest":"sha256:%s","sourceRevision":"abc1234"}},
               "contracts":{"session-api":"3.0.0"},"laneCount":2}]
             """.formatted("1".repeat(64), "2".repeat(64), "a".repeat(64), "c".repeat(64), "e".repeat(64));
 
-    private static final Workbench.VariantRules PREVIEW = (rulesArtifact, version, overrides) -> Http.JSON.readTree(
-            """
+    private static final Workbench.VariantRules PREVIEW =
+            (rulesArtifact, version, overrides) -> Http.JSON.readTree("""
             {"effectiveRulesDigest":"%s","overrides":{"game.rules.win-score-threshold":22}}
             """.formatted("b".repeat(64)));
 
@@ -77,7 +78,8 @@ class WorkbenchHarnessTest {
         assertThat(manifest.at("/variants/1/effectiveRulesDigest").asString()).isEqualTo("b".repeat(64));
         assertThat(manifest.at("/variants/1/rulesArtifact/digest").asString()).isEqualTo("1".repeat(64));
         assertThat(manifest.at("/variants/1/parameterSpaceVersion").asInt()).isEqualTo(1);
-        assertThat(manifest.at("/variants/1/overrides/game.rules.win-score-threshold").asInt())
+        assertThat(manifest.at("/variants/1/overrides/game.rules.win-score-threshold")
+                        .asInt())
                 .isEqualTo(22);
         assertThat(manifest.at("/variants/1/effectiveContentDigest").asString()).isEqualTo("c".repeat(64));
         assertThat(manifest.at("/variants/1/contentArtifact/name").asString()).isEqualTo("base");

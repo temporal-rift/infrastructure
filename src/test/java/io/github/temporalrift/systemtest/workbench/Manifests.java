@@ -80,7 +80,9 @@ final class Manifests {
             if (CANDIDATE.equals(label)) {
                 var preview = catalog.variantRules()
                         .preview(bundle.path("rulesArtifact"), PARAMETER_SPACE_VERSION, CANDIDATE_OVERRIDES);
-                variant.put("effectiveRulesDigest", preview.path("effectiveRulesDigest").asString());
+                variant.put(
+                        "effectiveRulesDigest",
+                        preview.path("effectiveRulesDigest").asString());
                 variant.put("parameterSpaceVersion", PARAMETER_SPACE_VERSION);
                 variant.set("overrides", preview.path("overrides").deepCopy());
             } else {
