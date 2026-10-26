@@ -116,7 +116,7 @@ services:
     profiles: [local-issuer]
 
   game-service:
-    mem_limit: 768m
+    mem_limit: 1024m
     logging: !override
       driver: json-file
     ports: !override
