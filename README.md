@@ -466,7 +466,7 @@ fails when a limit differs. `verify-simulation-deployment.sh` fails when a limit
 | `kafka` | 1024m | 512m | pending first measured run |
 | `kafka-topics` | 256m | 128m | pending first measured run |
 | `config-server` | 512m | 256m | pending first measured run |
-| `game-service` | 768m | 512m | pending first measured run |
+| `game-service` | 1024m | 512m | pending first measured run |
 | `timeline-service` | 768m | 512m | pending first measured run |
 | `read-service` | 768m | 512m | pending first measured run |
 | `kafka-observer` | 32m | n/a | pending first measured run |
