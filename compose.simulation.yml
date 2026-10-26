@@ -125,6 +125,8 @@ services:
       <<: *simulation-lane-labels
     environment:
       GAME_SIMULATION_ENABLED: "true"
+      # Bots play one game after another without pause; the per-player limit of an ordinary deployment would refuse them.
+      GAME_RATE_LIMIT_REQUESTS_PER_MINUTE: "1000000"
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
       JAVA_TOOL_OPTIONS: "-Xmx512m"

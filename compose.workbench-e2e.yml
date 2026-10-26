@@ -34,7 +34,8 @@ services:
         {"requestParam":"scope","match":"simulation:read simulation:write","claims":{"scope":"simulation:read simulation:write"}},
         {"requestParam":"subject","match":"designer","claims":{"scope":"simulation:read simulation:write simulation:observe","preferred_username":"designer"}},
         {"requestParam":"subject","match":"analyst","claims":{"scope":"simulation:read simulation:write","preferred_username":"analyst"}},
-        {"requestParam":"subject","match":"reader","claims":{"scope":"simulation:read","preferred_username":"reader"}}]}]}
+        {"requestParam":"subject","match":"reader","claims":{"scope":"simulation:read","preferred_username":"reader"}},
+        {"requestParam":"client_id","match":"*","claims":{"sub":"$${clientId}"}}]}]}
 
   workbench-postgres:
     image: postgres:16-alpine
