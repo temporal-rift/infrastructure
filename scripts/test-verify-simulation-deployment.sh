@@ -224,6 +224,21 @@ old_pin_output="$(SIMULATION_SERVICES_DIR="$old_pin_root/services" SIMULATION_CO
 [[ "$old_pin_output" == *"simulation-control-api.version"* ]] \
   || { echo "The writer error must name simulation-control-api.version, got: $old_pin_output" >&2; exit 1; }
 
+# A compatible patch release of the control contract is accepted by both the validator and the manifest writer.
+patch_pin_root="$fixtures_dir/patch-control-pin"
+setup_valid_deployment "$patch_pin_root"
+for service in game-service timeline-service; do
+  sed -i 's#<simulation-control-api.version>2.0.0</simulation-control-api.version>#<simulation-control-api.version>2.0.1</simulation-control-api.version>#' \
+    "$patch_pin_root/services/$service/pom.xml"
+done
+SIMULATION_SERVICES_DIR="$patch_pin_root/services" SIMULATION_CONFIG_REPO="$patch_pin_root/config-repo" \
+  SIMULATION_CATALOG="$patch_pin_root/catalog.yml" SIMULATION_LANE=lane-a SIMULATION_EXPERIMENT=exp-1 \
+  SIMULATION_CASE=case-1 JWT_ISSUER_URI=https://issuer.example \
+  bash "$writer" "$patch_pin_root/manifest.json" > /dev/null \
+  || { echo "The manifest writer must accept simulation-control-api 2.0.1." >&2; exit 1; }
+run_validator "$patch_pin_root" > /dev/null \
+  || { echo "The validator must accept simulation-control-api 2.0.1." >&2; exit 1; }
+
 # A lane that would start an observability service, trace, or run unbounded fails clearly.
 profile_root="$fixtures_dir/profile"
 setup_valid_deployment "$profile_root"

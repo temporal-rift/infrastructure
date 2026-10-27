@@ -8,8 +8,13 @@
 
 simulation_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# The only simulation-control-api version a lane accepts: it opens and closes one execution context per game.
-simulation_control_api_required="2.0.0"
+# A lane accepts the simulation-control-api 2.x line: it opens and closes one execution context per game, and a
+# compatible minor or patch release keeps doing so.
+simulation_control_api_required="2.x"
+
+simulation_control_api_accepted() {
+  [[ "$1" =~ ^2\.[0-9]+\.[0-9]+$ ]]
+}
 
 simulation_file_digest() {
   if [[ -f "$1" ]]; then

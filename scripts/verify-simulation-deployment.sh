@@ -223,7 +223,7 @@ check_shared_pin "action-event.version" "$game_pom" "$timeline_pom" "$read_pom"
 check_shared_pin "scoring-event.version" "$game_pom" "$read_pom"
 check_shared_pin "simulation-control-api.version" "$game_pom" "$timeline_pom"
 control_pin="$(pom_version "$game_pom" "simulation-control-api.version")"
-[[ "$control_pin" == "$simulation_control_api_required" ]] \
+simulation_control_api_accepted "$control_pin" \
   || fail "incompatible simulation-control-api.version pin $control_pin in $game_pom: a lane accepts only $simulation_control_api_required, which opens one execution context per game."
 
 # --- Manifest freshness ---
