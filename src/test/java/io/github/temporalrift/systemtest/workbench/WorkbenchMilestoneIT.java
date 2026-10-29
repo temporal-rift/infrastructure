@@ -7,6 +7,7 @@ import static org.awaitility.Awaitility.await;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,7 +15,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterAll;
@@ -804,18 +804,26 @@ class WorkbenchMilestoneIT {
         var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
         var startedBefore = laneServiceStarts();
 
-        var readGames = new ConcurrentHashMap<String, Set<String>>();
-        var sampler = sampleReadServiceGames(readGames);
-        String runId;
-        JsonNode run;
-        try {
-            runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
-                    .path("runId")
-                    .asString();
-            run = designer.awaitRun(runId, Workbench::isFinal, FIXTURE_TIMEOUT, "the two sequential cases to finish");
-        } finally {
-            sampler.interrupt();
-        }
+        var runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
+                .path("runId")
+                .asString();
+        // While the cases play, sample the game each lane's read-service holds for the case it has open.
+        var readGames = new HashMap<String, Set<String>>();
+        var control = issuer.token("workbench-operator", Issuer.CONTROL);
+        var latest = new JsonNode[1];
+        await("the two sequential cases to finish")
+                .atMost(FIXTURE_TIMEOUT)
+                .pollInterval(Duration.ofSeconds(1))
+                .until(() -> {
+                    sampleReadServiceGames(control, readGames);
+                    var response = designer.get("/api/v1/runs/" + runId);
+                    if (response.status() != 200) {
+                        return false;
+                    }
+                    latest[0] = response.json();
+                    return Workbench.isFinal(latest[0]);
+                });
+        var run = latest[0];
 
         assertThat(run.path("counts").path("succeeded").asInt())
                 .as("both variants play to success: %s", run)
@@ -840,34 +848,23 @@ class WorkbenchMilestoneIT {
     }
 
     /**
-     * Records, until interrupted, the game each lane's read-service holds for the case it has open, as its checkpoint
-     * names it. Each case must find only its own game there, which needs the earlier case closed on read-service.
+     * Records the game each lane's read-service holds for the case it has open, as its checkpoint names it. Each case
+     * must find only its own game there, which needs the earlier case closed on read-service.
      */
-    private Thread sampleReadServiceGames(Map<String, Set<String>> gamesByCase) {
-        var control = issuer.token("workbench-operator", Issuer.CONTROL);
-        return Thread.ofVirtual().start(() -> {
-            try {
-                while (!Thread.currentThread().isInterrupted()) {
-                    for (var lane : deployment.lanes()) {
-                        var checkpoint = Http.get(lane.readUrl() + "/internal/simulation/v1/checkpoint", control);
-                        if (checkpoint.status() != 200) {
-                            continue;
-                        }
-                        var json = checkpoint.json();
-                        var gameId = json.path("gameId");
-                        if (!gameId.isNull() && !gameId.isMissingNode()) {
-                            gamesByCase
-                                    .computeIfAbsent(
-                                            json.path("caseKey").asString(), _ -> ConcurrentHashMap.newKeySet())
-                                    .add(gameId.asString());
-                        }
-                    }
-                    Thread.sleep(250);
-                }
-            } catch (InterruptedException | IllegalStateException _) {
-                // Interrupted: the run finished.
+    private void sampleReadServiceGames(String control, Map<String, Set<String>> gamesByCase) {
+        for (var lane : deployment.lanes()) {
+            var checkpoint = Http.get(lane.readUrl() + "/internal/simulation/v1/checkpoint", control);
+            if (checkpoint.status() != 200) {
+                continue;
             }
-        });
+            var json = checkpoint.json();
+            var gameId = json.path("gameId");
+            if (!gameId.isNull() && !gameId.isMissingNode()) {
+                gamesByCase
+                        .computeIfAbsent(json.path("caseKey").asString(), _ -> new TreeSet<>())
+                        .add(gameId.asString());
+            }
+        }
     }
 
     /** When each lane's game, timeline and read service container last started. */
