@@ -76,8 +76,6 @@ action_api="$(pom_version "$game_pom" "action-api.version")"
 scoring_api="$(pom_version "$game_pom" "scoring-api.version")"
 projection_api="$(pom_version "$read_pom" "projection-api.version")"
 chains_api="$(pom_version "$timeline_pom" "chains-api.version")"
-simulation_control_game="$(pom_version "$game_pom" "simulation-control-api.version")"
-simulation_control_timeline="$(pom_version "$timeline_pom" "simulation-control-api.version")"
 
 # A missing pin is a broken manifest, not an empty string.
 for name_value in \
@@ -89,24 +87,32 @@ for name_value in \
   "action-api:$action_api" \
   "scoring-api:$scoring_api" \
   "projection-api:$projection_api" \
-  "chains-api:$chains_api" \
-  "simulation-control-api(game-service):$simulation_control_game" \
-  "simulation-control-api(timeline-service):$simulation_control_timeline"; do
+  "chains-api:$chains_api"; do
   if [[ "${name_value#*:}" == "" ]]; then
     echo "Cannot write manifest: unresolvable contract pin ${name_value%%:*}" >&2
     exit 1
   fi
 done
 
-if [[ "$simulation_control_game" != "$simulation_control_timeline" ]]; then
-  echo "Cannot write manifest: incompatible simulation-control-api pins across the lane service set ($simulation_control_game vs $simulation_control_timeline): deploy one compatible control contract." >&2
-  exit 1
-fi
-if ! simulation_control_api_accepted "$simulation_control_game"; then
-  echo "Cannot write manifest: incompatible simulation-control-api.version pin $simulation_control_game: a lane accepts only $simulation_control_api_required." >&2
-  exit 1
-fi
-simulation_control="$simulation_control_game"
+# Every lane service serves the control contract, so a case can be closed on all three; the manifest records the one
+# version they share.
+simulation_control=""
+for service in $simulation_control_api_services; do
+  service_control="$(pom_version "$services_dir/$service/pom.xml" "simulation-control-api.version")"
+  if [[ -z "$service_control" ]]; then
+    echo "Cannot write manifest: $service pins no simulation-control-api.version: a lane requires $simulation_control_api_required on every service." >&2
+    exit 1
+  fi
+  if ! simulation_control_api_accepted "$service_control"; then
+    echo "Cannot write manifest: $service pins incompatible simulation-control-api.version $service_control: a lane requires $simulation_control_api_required." >&2
+    exit 1
+  fi
+  if [[ -n "$simulation_control" && "$service_control" != "$simulation_control" ]]; then
+    echo "Cannot write manifest: incompatible simulation-control-api pins across the lane service set ($simulation_control vs $service_control in $service): deploy one compatible control contract." >&2
+    exit 1
+  fi
+  simulation_control="$service_control"
+done
 
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 issuer="${JWT_ISSUER_URI:-unconfigured}"

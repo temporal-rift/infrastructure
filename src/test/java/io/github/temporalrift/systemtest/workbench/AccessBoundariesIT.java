@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.AfterAll;
@@ -35,11 +36,22 @@ class AccessBoundariesIT {
     void anOrdinaryDeploymentHasNoExecutionControlsEvenForTheOperator() {
         var operator = issuer.token("workbench-operator", Issuer.CONTROL);
         var bot = issuer.token(deployment.lanes().getFirst().bots().getFirst().toString(), null);
-        for (var base : new String[] {deployment.ordinaryGameUrl(), deployment.ordinaryTimelineUrl()}) {
+        for (var base : new String[] {
+            deployment.ordinaryGameUrl(), deployment.ordinaryTimelineUrl(), deployment.ordinaryReadUrl()
+        }) {
             for (var token : new String[] {operator, bot}) {
                 assertThat(Http.send("PUT", base + CONTROL_PATHS_PUT, token, "{}", Map.of())
                                 .status())
                         .as("configure on %s", base)
+                        .isEqualTo(404);
+                assertThat(Http.send(
+                                        "DELETE",
+                                        base + CONTROL_PATHS_PUT + "?caseKey=" + UUID.randomUUID(),
+                                        token,
+                                        null,
+                                        Map.of())
+                                .status())
+                        .as("close on %s", base)
                         .isEqualTo(404);
                 assertThat(Http.get(base + CHECKPOINT, token).status())
                         .as("checkpoint on %s", base)
@@ -58,7 +70,7 @@ class AccessBoundariesIT {
         var operator = issuer.token("workbench-operator", Issuer.CONTROL);
         var bot = issuer.token(lane.bots().getFirst().toString(), null);
         var designer = issuer.token("designer-api", Issuer.DESIGNER);
-        for (var base : new String[] {lane.gameUrl(), lane.timelineUrl()}) {
+        for (var base : new String[] {lane.gameUrl(), lane.timelineUrl(), lane.readUrl()}) {
             assertThat(Http.get(base + CHECKPOINT, null).status())
                     .as("no credential")
                     .isEqualTo(401);

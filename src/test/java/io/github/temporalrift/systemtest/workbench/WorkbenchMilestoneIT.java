@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.AfterAll;
@@ -803,21 +804,70 @@ class WorkbenchMilestoneIT {
         var experiment = designer.createExperiment(Manifests.build(deployment, catalog, spec), UUID.randomUUID());
         var startedBefore = laneServiceStarts();
 
-        var runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
-                .path("runId")
-                .asString();
-        var run = designer.awaitRun(runId, Workbench::isFinal, FIXTURE_TIMEOUT, "the two sequential cases to finish");
+        var readGames = new ConcurrentHashMap<String, Set<String>>();
+        var sampler = sampleReadServiceGames(readGames);
+        String runId;
+        JsonNode run;
+        try {
+            runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
+                    .path("runId")
+                    .asString();
+            run = designer.awaitRun(runId, Workbench::isFinal, FIXTURE_TIMEOUT, "the two sequential cases to finish");
+        } finally {
+            sampler.interrupt();
+        }
 
         assertThat(run.path("counts").path("succeeded").asInt())
                 .as("both variants play to success: %s", run)
                 .isEqualTo(2);
-        assertThat(designer.caseSummaries(runId, null, null).stream()
+        var summaries = designer.caseSummaries(runId, null, null);
+        assertThat(summaries.stream()
                         .map(summary -> summary.path("variantLabel").asString())
                         .distinct())
                 .containsExactlyInAnyOrder(Manifests.BASELINE, Manifests.CANDIDATE);
         assertThat(laneServiceStarts())
                 .as("no lane service restarted while the cases played")
                 .isEqualTo(startedBefore);
+        for (var summary : summaries) {
+            var caseKey = summary.path("caseKey").asString();
+            var attempts = designer.caseDetail(runId, summary.path("caseId").asString())
+                    .path("attempts");
+            var gameId = attempts.path(attempts.size() - 1).path("gameId").asString();
+            assertThat(readGames.getOrDefault(caseKey, Set.of()))
+                    .as("the games read-service held while case %s was open: %s", caseKey, readGames)
+                    .containsExactly(gameId);
+        }
+    }
+
+    /**
+     * Records, until interrupted, the game each lane's read-service holds for the case it has open, as its checkpoint
+     * names it. Each case must find only its own game there, which needs the earlier case closed on read-service.
+     */
+    private Thread sampleReadServiceGames(Map<String, Set<String>> gamesByCase) {
+        var control = issuer.token("workbench-operator", Issuer.CONTROL);
+        return Thread.ofVirtual().start(() -> {
+            try {
+                while (!Thread.currentThread().isInterrupted()) {
+                    for (var lane : deployment.lanes()) {
+                        var checkpoint = Http.get(lane.readUrl() + "/internal/simulation/v1/checkpoint", control);
+                        if (checkpoint.status() != 200) {
+                            continue;
+                        }
+                        var json = checkpoint.json();
+                        var gameId = json.path("gameId");
+                        if (!gameId.isNull() && !gameId.isMissingNode()) {
+                            gamesByCase
+                                    .computeIfAbsent(
+                                            json.path("caseKey").asString(), _ -> ConcurrentHashMap.newKeySet())
+                                    .add(gameId.asString());
+                        }
+                    }
+                    Thread.sleep(250);
+                }
+            } catch (InterruptedException | IllegalStateException _) {
+                // Interrupted: the run finished.
+            }
+        });
     }
 
     /** When each lane's game, timeline and read service container last started. */

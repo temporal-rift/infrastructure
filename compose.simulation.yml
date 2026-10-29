@@ -1,13 +1,13 @@
 name: temporal-rift-sim-${SIMULATION_LANE:?SIMULATION_LANE must be set to the lane name}
 
 # Isolated reproducible simulation execution lane. This is an overlay over compose.yml: it
-# enables the isolated simulation execution mode on game-service and timeline-service, scopes
+# enables the isolated simulation execution mode on game-service, timeline-service and read-service, scopes
 # every resource to one task-owned lane project, publishes only the lane's service ports on
 # loopback, and requires an issuer capable of minting deterministic bot, operator, and observer
 # identities. Local-dev behavior in compose.yml is untouched.
 #
 # A lane plays any number of cases in sequence without restarting, each in its own execution
-# context opened and closed through the control operations; bounded concurrency uses independent
+# context opened and closed on all three services through the control operations; bounded concurrency uses independent
 # lanes, each started as its own Compose project with its own broker, databases, and volumes.
 # Durable workbench evidence lives outside the disposable lane project.
 #
@@ -168,6 +168,7 @@ services:
     deploy:
       replicas: 1
     environment:
+      GAME_SIMULATION_ENABLED: "true"
       JWT_ISSUER_URI: "${JWT_ISSUER_URI:?JWT_ISSUER_URI must be set to the issuer minting lane identities}"
       SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: !reset null
       JAVA_TOOL_OPTIONS: "-Xmx512m"

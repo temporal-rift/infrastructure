@@ -32,7 +32,7 @@ write_pom() {
     <scoring-api.version>2.0.1</scoring-api.version>
     <projection-api.version>10.0.0</projection-api.version>
     <chains-api.version>2.0.0</chains-api.version>
-    <simulation-control-api.version>2.0.0</simulation-control-api.version>
+    <simulation-control-api.version>2.1.0</simulation-control-api.version>
   </properties>
 $extra
 </project>
@@ -153,12 +153,12 @@ sed 's#GAME_SIMULATION_ENABLED: "true"#GAME_SIMULATION_ENABLED: "false"#' \
 SIMULATION_COMPOSE_FILE="$no_sim_root/compose.yml" assert_failure_contains "must enable the isolated simulation execution mode" \
   run_validator "$no_sim_root"
 
-# Simulation mode on read-service fails clearly: it exposes no control operations.
+# A read-service without the isolated execution mode fails naming read-service: a case is closed on all three services.
 read_sim_root="$fixtures_dir/read-sim"
 setup_valid_deployment "$read_sim_root"
-awk '/^  read-service:/ {inread=1} inread && /SPRING_SECURITY_OAUTH2/ {print; print "      GAME_SIMULATION_ENABLED: \"true\""; inread=0; next} /^  [A-Za-z0-9_-]+:/ && $0 != "  read-service:" {inread=0} {print}' \
+awk '/^  [A-Za-z0-9_-]+:/ {inread=($0 == "  read-service:")} inread && /GAME_SIMULATION_ENABLED/ {next} {print}' \
   "$repo_root/compose.simulation.yml" > "$read_sim_root/compose.yml"
-SIMULATION_COMPOSE_FILE="$read_sim_root/compose.yml" assert_failure_contains "must not enable simulation mode on read-service" \
+SIMULATION_COMPOSE_FILE="$read_sim_root/compose.yml" assert_failure_contains "isolated simulation execution mode on read-service" \
   run_validator "$read_sim_root"
 
 # Non-loopback lane ports fail clearly.
@@ -199,45 +199,80 @@ sed -i 's#<timeline-event.version>7.1.0</timeline-event.version>#<timeline-event
 assert_failure_contains "incompatible timeline-event.version pins" \
   run_validator "$incompatible_root"
 
+# Sets one lane service's simulation-control-api pin in a fixture lane.
+set_control_pin() {
+  sed -i "s#<simulation-control-api.version>[^<]*</simulation-control-api.version>#<simulation-control-api.version>$3</simulation-control-api.version>#" \
+    "$1/services/$2/pom.xml"
+}
+
+# Writes the fixture lane's manifest again and prints the writer's output; fails the test if the writer
+# does not answer as expected (accept|refuse).
+write_fixture_manifest() {
+  local root="$1"
+  local expected="$2"
+  local output
+  if output="$(SIMULATION_SERVICES_DIR="$root/services" SIMULATION_CONFIG_REPO="$root/config-repo" \
+    SIMULATION_CATALOG="$root/catalog.yml" SIMULATION_LANE=lane-a SIMULATION_EXPERIMENT=exp-1 \
+    SIMULATION_CASE=case-1 JWT_ISSUER_URI=https://issuer.example \
+    bash "$writer" "$root/manifest.json" 2>&1)"; then
+    [[ "$expected" == "accept" ]] || { echo "The manifest writer must refuse $root: $output" >&2; exit 1; }
+  else
+    [[ "$expected" == "refuse" ]] || { echo "The manifest writer must accept $root: $output" >&2; exit 1; }
+  fi
+  printf '%s' "$output"
+}
+
 # A control-contract mismatch between the lane services fails clearly.
 control_mismatch_root="$fixtures_dir/control-mismatch"
 setup_valid_deployment "$control_mismatch_root"
-sed -i 's#<simulation-control-api.version>2.0.0</simulation-control-api.version>#<simulation-control-api.version>1.0.0</simulation-control-api.version>#' \
-  "$control_mismatch_root/services/timeline-service/pom.xml"
+set_control_pin "$control_mismatch_root" read-service 2.1.1
 assert_failure_contains "incompatible simulation-control-api.version pins" \
   run_validator "$control_mismatch_root"
+[[ "$(write_fixture_manifest "$control_mismatch_root" refuse)" == *"in read-service"* ]] \
+  || { echo "The writer must name the service whose control pin differs." >&2; exit 1; }
 
-# Services pinning the previous control contract fail with the incompatible-pin error, with no Docker involved.
-old_pin_root="$fixtures_dir/old-control-pin"
-setup_valid_deployment "$old_pin_root"
-for service in game-service timeline-service; do
-  sed -i 's#<simulation-control-api.version>2.0.0</simulation-control-api.version>#<simulation-control-api.version>1.1.1</simulation-control-api.version>#' \
-  "$old_pin_root/services/$service/pom.xml"
-done
-assert_failure_contains "incompatible simulation-control-api.version pin 1.1.1" \
-  run_validator "$old_pin_root"
-old_pin_output="$(SIMULATION_SERVICES_DIR="$old_pin_root/services" SIMULATION_CONFIG_REPO="$old_pin_root/config-repo" \
-  SIMULATION_CATALOG="$old_pin_root/catalog.yml" SIMULATION_LANE=lane-a SIMULATION_EXPERIMENT=exp-1 \
-  SIMULATION_CASE=case-1 JWT_ISSUER_URI=https://issuer.example \
-  bash "$writer" "$old_pin_root/old-manifest.json" 2>&1)" \
-  && { echo "The manifest writer must refuse a 1.x control pin." >&2; exit 1; }
-[[ "$old_pin_output" == *"simulation-control-api.version"* ]] \
-  || { echo "The writer error must name simulation-control-api.version, got: $old_pin_output" >&2; exit 1; }
+# A read-service that pins no control contract fails naming read-service, in the validator and the writer.
+read_unpinned_root="$fixtures_dir/read-unpinned-control"
+setup_valid_deployment "$read_unpinned_root"
+sed -i '/<simulation-control-api.version>/d' "$read_unpinned_root/services/read-service/pom.xml"
+assert_failure_contains "read-service pins no simulation-control-api.version" \
+  run_validator "$read_unpinned_root"
+[[ "$(write_fixture_manifest "$read_unpinned_root" refuse)" == *"read-service pins no simulation-control-api.version"* ]] \
+  || { echo "The writer must name read-service when it pins no control contract." >&2; exit 1; }
 
-# A compatible patch release of the control contract is accepted by both the validator and the manifest writer.
-patch_pin_root="$fixtures_dir/patch-control-pin"
-setup_valid_deployment "$patch_pin_root"
-for service in game-service timeline-service; do
-  sed -i 's#<simulation-control-api.version>2.0.0</simulation-control-api.version>#<simulation-control-api.version>2.0.1</simulation-control-api.version>#' \
-    "$patch_pin_root/services/$service/pom.xml"
+# A read-service on the control contract before 2.1.0 fails naming read-service and its pin.
+read_old_root="$fixtures_dir/read-old-control"
+setup_valid_deployment "$read_old_root"
+set_control_pin "$read_old_root" read-service 2.0.1
+assert_failure_contains "read-service pins incompatible simulation-control-api.version 2.0.1" \
+  run_validator "$read_old_root"
+
+# Services pinning an earlier control contract fail with the incompatible-pin error, with no Docker involved.
+for old_pin in 2.0.0 1.1.1 3.0.0; do
+  old_pin_root="$fixtures_dir/old-control-pin-$old_pin"
+  setup_valid_deployment "$old_pin_root"
+  for service in game-service timeline-service read-service; do
+    set_control_pin "$old_pin_root" "$service" "$old_pin"
+  done
+  assert_failure_contains "game-service pins incompatible simulation-control-api.version $old_pin" \
+    run_validator "$old_pin_root"
+  [[ "$(write_fixture_manifest "$old_pin_root" refuse)" == *"game-service pins incompatible simulation-control-api.version $old_pin"* ]] \
+    || { echo "The writer must refuse a $old_pin control pin naming the service." >&2; exit 1; }
 done
-SIMULATION_SERVICES_DIR="$patch_pin_root/services" SIMULATION_CONFIG_REPO="$patch_pin_root/config-repo" \
-  SIMULATION_CATALOG="$patch_pin_root/catalog.yml" SIMULATION_LANE=lane-a SIMULATION_EXPERIMENT=exp-1 \
-  SIMULATION_CASE=case-1 JWT_ISSUER_URI=https://issuer.example \
-  bash "$writer" "$patch_pin_root/manifest.json" > /dev/null \
-  || { echo "The manifest writer must accept simulation-control-api 2.0.1." >&2; exit 1; }
-run_validator "$patch_pin_root" > /dev/null \
-  || { echo "The validator must accept simulation-control-api 2.0.1." >&2; exit 1; }
+
+# A compatible later release of the control contract is accepted by both the validator and the manifest writer.
+for later_pin in 2.1.1 2.2.0; do
+  later_pin_root="$fixtures_dir/later-control-pin-$later_pin"
+  setup_valid_deployment "$later_pin_root"
+  for service in game-service timeline-service read-service; do
+    set_control_pin "$later_pin_root" "$service" "$later_pin"
+  done
+  write_fixture_manifest "$later_pin_root" accept > /dev/null
+  run_validator "$later_pin_root" > /dev/null \
+    || { echo "The validator must accept simulation-control-api $later_pin." >&2; exit 1; }
+  grep -q "\"simulation-control-api\": \"$later_pin\"" "$later_pin_root/manifest.json" \
+    || { echo "The manifest must record simulation-control-api $later_pin." >&2; exit 1; }
+done
 
 # A lane that would start an observability service, trace, or run unbounded fails clearly.
 profile_root="$fixtures_dir/profile"

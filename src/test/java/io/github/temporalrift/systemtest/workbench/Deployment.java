@@ -73,6 +73,10 @@ final class Deployment {
         return root.path("ordinary").path("timelineUrl").asString();
     }
 
+    String ordinaryReadUrl() {
+        return root.path("ordinary").path("readUrl").asString();
+    }
+
     int maxEras() {
         return root.path("maxEras").asInt();
     }

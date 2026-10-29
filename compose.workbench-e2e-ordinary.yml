@@ -1,6 +1,6 @@
-# An ordinary (non-simulation) game-service and timeline-service deployment for the workbench E2E, layered
-# on compose.yml as project temporal-rift-wbe2e-ordinary. It sets no simulation mode, so control operations
-# must be unavailable on it. Only the two services the proof calls are started; everything else is
+# An ordinary (non-simulation) game-service, timeline-service and read-service deployment for the workbench E2E,
+# layered on compose.yml as project temporal-rift-wbe2e-ordinary. It sets no simulation mode, so control operations
+# must be unavailable on it. Only the three services the proof calls are started; everything else is
 # unpublished so no host port can collide with a developer's stack.
 #
 # Required environment: SIMULATION_OBSERVER_NETWORK (the shared network, for the issuer key set).
@@ -57,7 +57,8 @@ services:
     image: temporal-rift/sim-timeline-service:${SIMULATION_IMAGE_TAG:-local}
     ports: !override
       - "127.0.0.1:18301:8080"
-  # Not started, but its dependency on the local issuer must not leave the project invalid.
   read-service:
-    depends_on:
-      identity-provider: !reset null
+    <<: *ordinary-service
+    image: temporal-rift/sim-read-service:${SIMULATION_IMAGE_TAG:-local}
+    ports: !override
+      - "127.0.0.1:18302:8080"

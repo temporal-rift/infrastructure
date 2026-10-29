@@ -8,12 +8,14 @@
 
 simulation_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# A lane accepts the simulation-control-api 2.x line: it opens and closes one execution context per game, and a
-# compatible minor or patch release keeps doing so.
-simulation_control_api_required="2.x"
+# A lane requires simulation-control-api 2.1.0 or a later compatible 2.x release on every lane service: 2.1.0 is
+# the first version read-service serves, so it is the first that closes a case on all three services, and a
+# service holding state of a closed case refuses the next one instead of playing it.
+simulation_control_api_required="2.1.0 or a later 2.x"
+simulation_control_api_services="game-service timeline-service read-service"
 
 simulation_control_api_accepted() {
-  [[ "$1" =~ ^2\.[0-9]+\.[0-9]+$ ]]
+  [[ "$1" =~ ^2\.([0-9]+)\.[0-9]+$ ]] && (( BASH_REMATCH[1] >= 1 ))
 }
 
 simulation_file_digest() {

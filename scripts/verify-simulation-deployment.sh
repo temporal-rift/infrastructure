@@ -112,14 +112,10 @@ for service in game-service timeline-service read-service; do
   done
 done
 
-for service in game-service timeline-service; do
+for service in $simulation_control_api_services; do
   service_block "$service" "$compose_file" | grep -q 'GAME_SIMULATION_ENABLED: "true"' \
-    || fail "$compose_file must enable the isolated simulation execution mode on $service (GAME_SIMULATION_ENABLED: \"true\"): control operations exist only in simulation deployments."
+    || fail "$compose_file must enable the isolated simulation execution mode on $service (GAME_SIMULATION_ENABLED: \"true\"): control operations exist only in simulation deployments, and a lane closes every case on all three services."
 done
-
-if service_block "read-service" "$compose_file" | grep -q "GAME_SIMULATION_ENABLED"; then
-  fail "$compose_file must not enable simulation mode on read-service: it exposes no control operations."
-fi
 
 service_block "read-service" "$compose_file" | grep -qE "replicas:[[:space:]]*1([[:space:]]*(#.*)?)?$" \
   || fail "$compose_file must pin read-service to a single replica: one lane runs one case at a time."
@@ -221,10 +217,16 @@ check_shared_pin "timeline-event.version" "$game_pom" "$timeline_pom" "$read_pom
 check_shared_pin "session-event.version" "$game_pom" "$timeline_pom" "$read_pom"
 check_shared_pin "action-event.version" "$game_pom" "$timeline_pom" "$read_pom"
 check_shared_pin "scoring-event.version" "$game_pom" "$read_pom"
-check_shared_pin "simulation-control-api.version" "$game_pom" "$timeline_pom"
-control_pin="$(pom_version "$game_pom" "simulation-control-api.version")"
-simulation_control_api_accepted "$control_pin" \
-  || fail "incompatible simulation-control-api.version pin $control_pin in $game_pom: a lane accepts only $simulation_control_api_required, which opens one execution context per game."
+# Each lane service is checked on its own first, so a failure names the service and its pin.
+for service in $simulation_control_api_services; do
+  service_pom="$services_dir/$service/pom.xml"
+  control_pin="$(pom_version "$service_pom" "simulation-control-api.version")"
+  [[ -n "$control_pin" ]] \
+    || fail "$service pins no simulation-control-api.version in $service_pom: a lane requires $simulation_control_api_required on every service, so each case can be closed on all three."
+  simulation_control_api_accepted "$control_pin" \
+    || fail "$service pins incompatible simulation-control-api.version $control_pin in $service_pom: a lane requires $simulation_control_api_required, so each case can be closed on all three services."
+done
+check_shared_pin "simulation-control-api.version" "$game_pom" "$timeline_pom" "$read_pom"
 
 # --- Manifest freshness ---
 
