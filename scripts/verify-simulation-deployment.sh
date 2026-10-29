@@ -78,11 +78,12 @@ grep -q 'SIMULATION_LANE:?' "$compose_file" \
   || fail "$compose_file must require SIMULATION_LANE instead of defaulting to a shared project name."
 
 # Prints the two-space-indented Compose block for one service (from its
-# "  <service>:" header to the next top-level key).
+# "  <service>:" header to the next top-level key), without comment lines,
+# so a commented-out setting never satisfies a check.
 service_block() {
   awk -v svc="$1" '
     /^  [A-Za-z0-9_-]+:/ { in_block = ($0 == "  " svc ":") }
-    in_block { print }
+    in_block && !/^[[:space:]]*#/ { print }
   ' "$2"
 }
 

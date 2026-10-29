@@ -161,6 +161,39 @@ awk '/^  [A-Za-z0-9_-]+:/ {inread=($0 == "  read-service:")} inread && /GAME_SIM
 SIMULATION_COMPOSE_FILE="$read_sim_root/compose.yml" assert_failure_contains "isolated simulation execution mode on read-service" \
   run_validator "$read_sim_root"
 
+# A commented-out "true" next to a live "false" does not enable simulation mode, on any lane service.
+for service in game-service timeline-service read-service; do
+  commented_root="$fixtures_dir/commented-sim-$service"
+  setup_valid_deployment "$commented_root"
+  awk -v svc="  $service:" '
+    /^  [A-Za-z0-9_-]+:/ { in_block = ($0 == svc) }
+    in_block && /GAME_SIMULATION_ENABLED: "true"/ {
+      print "      # GAME_SIMULATION_ENABLED: \"true\""
+      print "      GAME_SIMULATION_ENABLED: \"false\""
+      next
+    }
+    { print }
+  ' "$repo_root/compose.simulation.yml" > "$commented_root/compose.yml"
+  SIMULATION_COMPOSE_FILE="$commented_root/compose.yml" \
+    assert_failure_contains "isolated simulation execution mode on $service" \
+    run_validator "$commented_root"
+done
+
+# A commented-out tracing setting does not turn tracing off either.
+commented_tracing_root="$fixtures_dir/commented-tracing"
+setup_valid_deployment "$commented_tracing_root"
+awk '
+  /^  [A-Za-z0-9_-]+:/ { in_block = ($0 == "  read-service:") }
+  in_block && /TRACING_SAMPLING_PROBABILITY/ {
+    print "      # TRACING_SAMPLING_PROBABILITY: \"0.0\""
+    print "      TRACING_SAMPLING_PROBABILITY: \"1.0\""
+    next
+  }
+  { print }
+' "$repo_root/compose.simulation.yml" > "$commented_tracing_root/compose.yml"
+SIMULATION_COMPOSE_FILE="$commented_tracing_root/compose.yml" assert_failure_contains "tracing off on read-service" \
+  run_validator "$commented_tracing_root"
+
 # Non-loopback lane ports fail clearly.
 loopback_root="$fixtures_dir/loopback"
 setup_valid_deployment "$loopback_root"
