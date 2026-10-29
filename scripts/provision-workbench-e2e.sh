@@ -130,16 +130,20 @@ for pid in "${pids[@]}"; do
   wait "$pid" || fail "a lane did not become healthy."
 done
 
-# No case has run yet, so every lane service answers the operator's checkpoint read with EXECUTION_NOT_CONFIGURED.
-# A service without control operations would answer 404 instead, and the workbench would recycle its lane after
-# every case because the case could not be closed there.
+# Every lane service must serve the control operations: a fresh lane answers the operator's checkpoint read with
+# 409 EXECUTION_NOT_CONFIGURED, and a lane reused from an earlier provisioning may answer 200 for a context it kept.
+# A service without control operations answers 404 SIMULATION_CONTROL_UNAVAILABLE, and the workbench would recycle
+# its lane after every case because the case could not be closed there.
 echo "== Checking that every lane service serves the control operations"
 for k in $(seq 1 "$lanes"); do
   for port in $((18100 + 10 * k)) $((18101 + 10 * k)) $((18102 + 10 * k)); do
     answer="$(curl --silent --max-time 10 -H "Authorization: Bearer $operator_token" \
       "http://127.0.0.1:$port/internal/simulation/v1/checkpoint" -w ' %{http_code}')" || answer="unreachable"
-    [[ "$answer" == *'"EXECUTION_NOT_CONFIGURED"'*" 409" ]] \
-      || fail "lane ${workbench_e2e_lane_prefix}$k: the service on port $port does not answer EXECUTION_NOT_CONFIGURED before its first case, so it does not serve the control operations (got: $answer)."
+    case "$answer" in
+      *" 200" | *'"EXECUTION_NOT_CONFIGURED"'*" 409") ;;
+      *" 404") fail "lane ${workbench_e2e_lane_prefix}$k: the service on port $port does not serve the control operations (got: $answer); enable its simulation mode." ;;
+      *) fail "lane ${workbench_e2e_lane_prefix}$k: the service on port $port did not answer the operator's checkpoint read (got: $answer)." ;;
+    esac
   done
 done
 
