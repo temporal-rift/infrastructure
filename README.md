@@ -421,9 +421,10 @@ docker compose -p temporal-rift-playtest -f compose.yml -f compose.playtest.yml 
 
 `compose.simulation.yml` is an overlay over `compose.yml` that provides one isolated,
 reproducible execution lane that plays any number of cases in sequence, each in its own execution context
-carrying its rules (`simulation-control-api` 2.0.0 opens and closes one per game, so the lane never restarts
-between cases): game-service and timeline-service run with their
-isolated execution mode enabled (`GAME_SIMULATION_ENABLED=true`), every resource is
+carrying its rules (`simulation-control-api` 2.1.0 opens and closes one per game, so the lane never restarts
+between cases): game-service, timeline-service and read-service run with their
+isolated execution mode enabled (`GAME_SIMULATION_ENABLED=true`), and a case is closed on all three before the next
+one opens, so read-service never serves a closed case's game. Every resource is
 scoped to the task-owned `temporal-rift-sim-<lane>` project with lane/experiment/case
 labels, and only the lane's service ports are published on loopback. Bots use the normal
 authenticated participant APIs with deterministic per-seat identities; only the
@@ -439,7 +440,8 @@ digests, content digests with retained bundle contents, the `LOGICAL` timing mod
 attribution without secrets. `effectiveRulesDigest` identifies the rules meaning computed from
 `properties`; `rulesArtifactDigest` identifies the retained `effective-rules.json` artifact.
 `verify-simulation-deployment.sh` fails before startup on any missing or drifted input
-(`MANIFEST_MISMATCH`), and `check-simulation-readiness.sh` requires both services
+(`MANIFEST_MISMATCH`) and on any lane service that does not pin `simulation-control-api` 2.1.0 or a later 2.x,
+naming the service and its pin, and `check-simulation-readiness.sh` requires both services
 drained on the same bundle plus downstream watermark observation before gameplay.
 Teardown removes only the named lane project; durable workbench evidence lives outside
 it. See `simulation/README.md` for the exact provision, readiness, cancellation, and
@@ -579,7 +581,7 @@ system, browser and security suites, which remain the gates for human gameplay.
 
 | Suite | Runs | Proves |
 |---|---|---|
-| `core` | `WorkbenchMilestoneIT`, `AccessBoundariesIT`, `DesignerJourneyIT` | The seed-42 matrix (all 10 three-, 5 four- and 1 five-player faction sets, `CYCLIC` rotation, `random-v1` and `faction-greedy-v1`, two rules variants = 220 coordinates) is fully accounted for; report figures equal figures recomputed from the case results; a multi-seed fixture reports block counts, 95% block-bootstrap intervals and paired differences, and an induced lane fault shows its unmatched counterpart; a saved case reproduces (`MATCH`) after a workbench restart while other lanes are busy; tampered or missing inputs are refused (`MANIFEST_MISMATCH`); repeated HTTP operations and redelivered Kafka records add no samples; PLAYER replays share no hand cards and OBSERVER replays need `simulation:observe`; ordinary deployments answer control operations with 404, bots receive 403; cleanup names only task-owned resources; and the designer UI journey (preview/freeze, launch, progress, report, comparison, player and observer inspection, reproduction) completes |
+| `core` | `WorkbenchMilestoneIT`, `AccessBoundariesIT`, `DesignerJourneyIT` | The seed-42 matrix (all 10 three-, 5 four- and 1 five-player faction sets, `CYCLIC` rotation, `random-v1` and `faction-greedy-v1`, two rules variants = 220 coordinates) is fully accounted for; report figures equal figures recomputed from the case results; a multi-seed fixture reports block counts, 95% block-bootstrap intervals and paired differences, and an induced lane fault shows its unmatched counterpart; a saved case reproduces (`MATCH`) after a workbench restart while other lanes are busy; tampered or missing inputs are refused (`MANIFEST_MISMATCH`); repeated HTTP operations and redelivered Kafka records add no samples; PLAYER replays share no hand cards and OBSERVER replays need `simulation:observe`; two sequential cases on one lane each find only their own game on read-service; ordinary deployments, read-service included, answer control operations with 404, and bots receive 403; cleanup names only task-owned resources; and the designer UI journey (preview/freeze, launch, progress, report, comparison, player and observer inspection, reproduction) completes |
 | `recovery` | `WorkbenchRecoveryIT` | A 1000-case run killed after 400 successes keeps those results unchanged on resume, never counts more than 1000 successes, and keeps them on cancellation |
 
 One-seed fixtures validate workflow and coverage, not statistical balance, and bot results say nothing about balance for
@@ -599,12 +601,14 @@ suite instead shows decisions depend only on participant views by reproducing di
   score threshold 22 override of the baseline rules). Each lane manifest
   records its bundle's `effectiveRulesDigest`, `rulesArtifactDigest` and `effectiveContentDigest`, and retains the
   canonical `effective-rules.json` beside it;
-- an ordinary deployment (`temporal-rift-wbe2e-ordinary`) without simulation mode;
+- an ordinary deployment (`temporal-rift-wbe2e-ordinary`) of game-service, timeline-service and read-service without
+  simulation mode;
 - the workbench stack (`temporal-rift-workbench-e2e`): the workbench, its database and a lane recycler.
 
-A lane plays any number of cases in sequence, each in its own execution context carrying its rules, so no case
-recycles it. The recycler's `POST /lanes/{lane}/reset` and `scripts/recycle-simulation-lane.sh` (which removes only that
-lane's project and starts it again) are recovery for a lane whose services are unhealthy or whose context cannot be
+A lane plays any number of cases in sequence, each in its own execution context carrying its rules and closed on
+game-service, timeline-service and read-service before the next one opens, so no case recycles it. The recycler's
+`POST /lanes/{lane}/reset` and `scripts/recycle-simulation-lane.sh` (which removes only that lane's project and starts
+it again) are recovery for a lane whose services are unhealthy or whose context cannot be
 closed. The workbench
 consumes per-lane broker addresses, served bundle digests, the lane's `rules-document`, and the reset hook as lane
 configuration (`workbench.execution.lanes[]`), written to `target/workbench-e2e/lanes.yml` together with the lane

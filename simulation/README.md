@@ -33,8 +33,8 @@ bash scripts/check-simulation-readiness.sh
 ```
 
 `write-simulation-manifest.sh` records the lane attribution, service revisions, adopted
-contract versions (including the control contract shared by game-service and
-timeline-service), the resolved effective rules document and its digests, the content
+contract versions (including the control contract shared by game-service,
+timeline-service, and read-service), the resolved effective rules document and its digests, the content
 digest, the `LOGICAL` timing mode, and the identity configuration without credential
 material. It also retains the canonical `effective-rules.json` and copies of every other
 digest input beside the manifest at `simulation/lanes/<lane>/`, so a later reader
@@ -43,7 +43,10 @@ deployment; never hand-edit it.
 
 `verify-simulation-deployment.sh` fails before any container starts when the lane,
 issuer, overlay, contract pins, manifest, retained bundle, broker grants, or score
-provenance are missing or incompatible. A bundle change after manifest generation fails
+provenance are missing or incompatible. Every lane service must enable the isolated
+execution mode and pin `simulation-control-api` 2.1.0 or a later 2.x; a service that
+pins no version or an earlier one fails verification, which names the service and its
+pin. A bundle change after manifest generation fails
 as `MANIFEST_MISMATCH` instead of deploying under a stale attribution.
 
 The lane project is named `temporal-rift-sim-<lane>`; every lane command scopes to it
@@ -55,7 +58,7 @@ never share storage, topics, or identities.
 | Caller | Lane access |
 |---|---|
 | Bot (one deterministic subject per seat/player ID) | Normal authenticated participant APIs only |
-| Operator (`simulation:control`) | Control operations (`PUT /internal/simulation/v1/execution`, `GET /internal/simulation/v1/checkpoint`, `PUT /internal/simulation/v1/clock`) plus participant APIs |
+| Operator (`simulation:control`) | Control operations on game-service, timeline-service, and read-service (`PUT` and `DELETE /internal/simulation/v1/execution`, `GET /internal/simulation/v1/checkpoint`, `PUT /internal/simulation/v1/clock`) plus participant APIs |
 | Observer (`simulation:observe`) | Read-only consumption of that lane's `game.events` and `timeline.events` with an independent consumer group |
 | Designer (`simulation:read` / `simulation:write`) | Workbench reads and writes outside the lane |
 
@@ -79,6 +82,17 @@ explicitly, for example as an additional service in the lane project or with:
 ```bash
 docker run --network temporal-rift-sim-$SIMULATION_LANE_default <observer-image>
 ```
+
+## Playing cases in sequence
+
+A case is closed on all three services, game-service, timeline-service, and read-service,
+between cases: the runner opens the case's execution context on each service, plays
+the game, and closes the context on each before it opens the next case. Closing
+discards that case's game, so read-service never serves a closed case's game to the
+next case, even when a retried case reuses its game ID. A service that still holds
+state of a closed case refuses the next context with `409 EXECUTION_STATE_NOT_CLEAN`,
+and only recycling the lane clears it. Before its first case, a lane's read-service
+answers the operator's checkpoint read with `409 EXECUTION_NOT_CONFIGURED`.
 
 ## Readiness before gameplay
 

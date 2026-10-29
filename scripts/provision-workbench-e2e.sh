@@ -130,10 +130,23 @@ for pid in "${pids[@]}"; do
   wait "$pid" || fail "a lane did not become healthy."
 done
 
+# No case has run yet, so every lane service answers the operator's checkpoint read with EXECUTION_NOT_CONFIGURED.
+# A service without control operations would answer 404 instead, and the workbench would recycle its lane after
+# every case because the case could not be closed there.
+echo "== Checking that every lane service serves the control operations"
+for k in $(seq 1 "$lanes"); do
+  for port in $((18100 + 10 * k)) $((18101 + 10 * k)) $((18102 + 10 * k)); do
+    answer="$(curl --silent --max-time 10 -H "Authorization: Bearer $operator_token" \
+      "http://127.0.0.1:$port/internal/simulation/v1/checkpoint" -w ' %{http_code}')" || answer="unreachable"
+    [[ "$answer" == *'"EXECUTION_NOT_CONFIGURED"'*" 409" ]] \
+      || fail "lane ${workbench_e2e_lane_prefix}$k: the service on port $port does not answer EXECUTION_NOT_CONFIGURED before its first case, so it does not serve the control operations (got: $answer)."
+  done
+done
+
 echo "== Starting the ordinary deployment"
 SIMULATION_IMAGE_TAG=wbe2e docker compose -p "$workbench_e2e_ordinary_project" \
   -f compose.yml -f compose.workbench-e2e-ordinary.yml \
-  up -d --wait --wait-timeout 420 game-service timeline-service
+  up -d --wait --wait-timeout 420 game-service timeline-service read-service
 
 echo "== Deriving the lane provenance declarations"
 image_digest() { docker image inspect "temporal-rift/sim-$1:wbe2e" --format '{{.Id}}'; }
@@ -195,7 +208,7 @@ echo "== Writing the deployment descriptor"
 {
   printf '{\n  "runId": "%s",\n  "issuer": "%s",\n  "workbenchUrl": "%s",\n' "$run_id" "$workbench_e2e_issuer_url" "$workbench_e2e_workbench_url"
   printf '  "workbenchProject": "%s",\n' "$workbench_e2e_project"
-  printf '  "ordinary": {"project": "%s", "gameUrl": "http://127.0.0.1:18300", "timelineUrl": "http://127.0.0.1:18301"},\n' "$workbench_e2e_ordinary_project"
+  printf '  "ordinary": {"project": "%s", "gameUrl": "http://127.0.0.1:18300", "timelineUrl": "http://127.0.0.1:18301", "readUrl": "http://127.0.0.1:18302"},\n' "$workbench_e2e_ordinary_project"
   printf '  "maxEras": %s,\n' "$max_eras"
   printf '  "lanes": [\n'
   for k in $(seq 1 "$lanes"); do
