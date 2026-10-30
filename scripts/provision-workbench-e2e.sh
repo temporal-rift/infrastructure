@@ -44,6 +44,10 @@ reason="$(workbench_e2e_require_workbench_revision "$workspace/simulation-workbe
 
 export WORKBENCH_E2E_REPO="$repo_root"
 export WORKBENCH_E2E_WORKSPACE="$workspace"
+# The recycler sees the checkouts at these paths and hands them to the runtime from inside its container. Git
+# Bash on Windows would rewrite them to drive-letter paths for docker, which a Linux container cannot use as its
+# own paths; kept as they are, Docker Desktop resolves them to the host checkouts. No-op elsewhere.
+export MSYS2_ENV_CONV_EXCL="WORKBENCH_E2E_REPO;WORKBENCH_E2E_WORKSPACE"
 export SIMULATION_OBSERVER_NETWORK="$workbench_e2e_network"
 
 cd "$repo_root"
