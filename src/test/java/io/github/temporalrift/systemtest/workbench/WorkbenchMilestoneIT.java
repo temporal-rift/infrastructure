@@ -1,7 +1,6 @@
 package io.github.temporalrift.systemtest.workbench;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.within;
 import static org.awaitility.Awaitility.await;
 
 import java.time.Duration;
@@ -214,22 +213,24 @@ class WorkbenchMilestoneIT {
         return entry;
     }
 
-    /** A winner by score threshold cannot be below the threshold of the bundle the variant ran under. */
+    /**
+     * A winner by score threshold cannot be below the threshold of the bundle the variant ran under. Faction
+     * objective and last-player-standing wins say nothing about the threshold.
+     */
     private void assertEachVariantPlayedItsOwnBundle(List<CaseRow> rows) {
         var decided = new LinkedHashMap<String, Integer>();
         for (var row : rows) {
             if (row.succeeded() && "WIN_CONDITION_MET".equals(row.endReason())) {
-                var best = row.scores().values().stream()
-                        .mapToInt(Integer::intValue)
-                        .max()
-                        .orElse(0);
                 decided.merge(row.variant(), 1, Integer::sum);
                 if (row.variant().equals(Manifests.CANDIDATE)) {
-                    assertThat(best)
-                            .as(
-                                    "a candidate win condition was met below the candidate threshold in case %s",
-                                    row.caseId())
-                            .isGreaterThanOrEqualTo(CANDIDATE_THRESHOLD);
+                    for (var seat : row.scoreThresholdWinnerSeats()) {
+                        assertThat(row.scores().get(seat))
+                                .as(
+                                        "a candidate score threshold win was met below the candidate threshold"
+                                                + " in case %s",
+                                        row.caseId())
+                                .isGreaterThanOrEqualTo(CANDIDATE_THRESHOLD);
+                    }
                 }
             }
         }
@@ -300,14 +301,14 @@ class WorkbenchMilestoneIT {
             assertThat(wins).as("faction_win_rate of %s", key).isNotNull();
             assertThat(wins.path("denominator").asInt()).as("games of %s", key).isEqualTo(tally.games());
             assertThat(wins.path("numerator").asDouble()).as("wins of %s", key).isEqualTo(tally.wins());
-            assertThat(wins.path("value").asDouble()).isCloseTo(tally.winRate(), within(1e-9));
+            assertThat(wins.path("value").asDouble()).isEqualTo(ReportMath.reported(tally.winRate()));
 
             var shared = ReportMath.factionMetric(cohort, "faction_shared_win_rate", key.faction());
             assertThat(shared).as("faction_shared_win_rate of %s", key).isNotNull();
             assertThat(shared.path("numerator").asDouble())
                     .as("shared wins of %s", key)
                     .isEqualTo(tally.sharedWins());
-            assertThat(shared.path("value").asDouble()).isCloseTo(tally.sharedWinRate(), within(1e-9));
+            assertThat(shared.path("value").asDouble()).isEqualTo(ReportMath.reported(tally.sharedWinRate()));
 
             for (var metric : List.of(wins, shared)) {
                 if (blocks < 2) {
@@ -561,10 +562,10 @@ class WorkbenchMilestoneIT {
                     new ReportMath.Key(Manifests.CANDIDATE, failedRow.policyId(), failedRow.playerCount(), faction);
             assertThat(metric.path("baselineValue").asDouble())
                     .as("baseline %s over matched blocks only", faction)
-                    .isCloseTo(tallies.get(baselineKey).winRate(), within(1e-9));
+                    .isEqualTo(ReportMath.reported(tallies.get(baselineKey).winRate()));
             assertThat(metric.path("candidateValue").asDouble())
                     .as("candidate %s over matched blocks only", faction)
-                    .isCloseTo(tallies.get(candidateKey).winRate(), within(1e-9));
+                    .isEqualTo(ReportMath.reported(tallies.get(candidateKey).winRate()));
         }
     }
 
@@ -604,7 +605,7 @@ class WorkbenchMilestoneIT {
                 Duration.ofMinutes(10),
                 "the restart to interrupt the unrelated run");
         assertThat(interrupted.path("state").asString()).isEqualTo("INTERRUPTED");
-        designer.post("/api/v1/runs/" + busy + "/resume", null, null).requireStatus(202);
+        designer.resume(busy, UUID.randomUUID()).requireStatus(202);
 
         var key = UUID.randomUUID();
         designer.reproduce(matrixRunId, saved.caseId(), key).requireStatus(202);
@@ -714,7 +715,7 @@ class WorkbenchMilestoneIT {
         var runId = designer.startRun(experiment.path("experimentId").asString(), UUID.randomUUID())
                 .path("runId")
                 .asString();
-        designer.post("/api/v1/runs/" + runId + "/cancel", null, null);
+        designer.cancel(runId, UUID.randomUUID()).requireStatus(202);
         designer.awaitRun(
                 runId,
                 run -> "CANCELLED".equals(run.path("state").asString()),
@@ -767,8 +768,9 @@ class WorkbenchMilestoneIT {
         var runKey = UUID.randomUUID();
         var run = designer.startRun(first, runKey).path("runId").asString();
         assertThat(designer.startRun(first, runKey).path("runId").asString()).isEqualTo(run);
-        designer.post("/api/v1/runs/" + run + "/cancel", null, null);
-        designer.post("/api/v1/runs/" + run + "/cancel", null, null);
+        var cancelKey = UUID.randomUUID();
+        designer.cancel(run, cancelKey).requireStatus(202);
+        designer.cancel(run, cancelKey).requireStatus(202);
         designer.awaitRun(run, Workbench::isFinal, FIXTURE_TIMEOUT, "the repeated run to be cancelled");
 
         assertThat(designer.get("/api/v1/experiments?limit=1")
@@ -778,11 +780,10 @@ class WorkbenchMilestoneIT {
                 .isEqualTo(experiments + 1);
         assertThat(designer.get("/api/v1/runs?limit=1").json().path("total").asInt())
                 .isEqualTo(runs + 1);
-        assertThat(designer.post("/api/v1/runs/" + matrixRunId + "/cancel", null, null)
-                        .status())
+        assertThat(designer.cancel(matrixRunId, UUID.randomUUID()).status())
                 .as("cancelling a final run is accepted without reopening it")
                 .isEqualTo(200);
-        assertThat(designer.post("/api/v1/runs/" + matrixRunId + "/resume", null, null)
+        assertThat(designer.resume(matrixRunId, UUID.randomUUID())
                         .requireStatus(409)
                         .code())
                 .isEqualTo("INVALID_RUN_STATE");

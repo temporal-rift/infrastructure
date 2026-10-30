@@ -1,5 +1,7 @@
 package io.github.temporalrift.systemtest.workbench;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +30,7 @@ final class ReportMath {
             String endReason,
             List<String> factions,
             List<String> winners,
+            List<Integer> scoreThresholdWinnerSeats,
             Map<Integer, Integer> scores) {
 
         static CaseRow of(JsonNode detail) {
@@ -36,10 +39,15 @@ final class ReportMath {
                     .forEach(seat -> factions.add(seat.path("faction").asString()));
             var result = detail.path("result");
             var winners = new ArrayList<String>();
+            var scoreThresholdWinnerSeats = new ArrayList<Integer>();
             var scores = new TreeMap<Integer, Integer>();
             if (!result.isNull() && !result.isMissingNode()) {
-                result.path("winners")
-                        .forEach(winner -> winners.add(winner.path("faction").asString()));
+                result.path("winners").forEach(winner -> {
+                    winners.add(winner.path("faction").asString());
+                    if ("SCORE_THRESHOLD".equals(winner.path("winType").asString())) {
+                        scoreThresholdWinnerSeats.add(winner.path("seatIndex").asInt());
+                    }
+                });
                 result.path("finalScores")
                         .forEach(score -> scores.put(
                                 score.path("seatIndex").asInt(),
@@ -55,6 +63,7 @@ final class ReportMath {
                     result.isNull() ? null : result.path("endReason").asString(),
                     List.copyOf(factions),
                     List.copyOf(winners),
+                    List.copyOf(scoreThresholdWinnerSeats),
                     scores);
         }
 
@@ -106,6 +115,11 @@ final class ReportMath {
         var result = new TreeMap<Key, Tally>();
         games.forEach((key, tally) -> result.put(key, new Tally(tally[0], tally[1], tally[2])));
         return result;
+    }
+
+    /** A figure as the workbench reports it: rounded half-even to 6 decimal places. */
+    static double reported(double value) {
+        return BigDecimal.valueOf(value).setScale(6, RoundingMode.HALF_EVEN).doubleValue();
     }
 
     /** The distinct seeds among a cohort's succeeded games: its independent blocks. */

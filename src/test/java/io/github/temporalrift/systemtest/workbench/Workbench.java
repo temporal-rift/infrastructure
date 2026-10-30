@@ -89,6 +89,14 @@ final class Workbench {
                 .json();
     }
 
+    Http.Response cancel(String runId, UUID key) {
+        return post("/api/v1/runs/" + runId + "/cancel", null, key);
+    }
+
+    Http.Response resume(String runId, UUID key) {
+        return post("/api/v1/runs/" + runId + "/resume", null, key);
+    }
+
     JsonNode run(String runId) {
         return get("/api/v1/runs/" + runId).requireStatus(200).json();
     }
