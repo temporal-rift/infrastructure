@@ -57,7 +57,7 @@ class WorkbenchHarnessTest {
     void aManifestCitesTheBaselineAndDefinesTheCandidateByOverrides() {
         var deployment = Deployment.of(DESCRIPTOR);
         var catalog = Http.JSON.readTree("""
-                [{"id":"random-v1","version":"1","artifactDigest":"%s"}]
+                [{"id":"random","version":"1.0.0","artifactDigest":"%s"}]
                 """.formatted("d".repeat(64)));
 
         var manifest = Manifests.build(
@@ -69,7 +69,7 @@ class WorkbenchHarnessTest {
                         List.of("42"),
                         List.of(3),
                         List.of(List.of("ERASERS", "PROPHETS", "WEAVERS")),
-                        List.of("random-v1"),
+                        List.of(Manifests.RANDOM),
                         2,
                         900));
 
@@ -124,7 +124,7 @@ class WorkbenchHarnessTest {
             rows.add(row("c" + game, "baseline", String.valueOf(game), "SUCCEEDED", winners));
         }
 
-        var tally = ReportMath.factionTallies(rows).get(new ReportMath.Key("baseline", "random-v1", 3, "ERASERS"));
+        var tally = ReportMath.factionTallies(rows).get(new ReportMath.Key("baseline", Manifests.RANDOM, 3, "ERASERS"));
 
         assertThat(tally.games()).isEqualTo(10);
         assertThat(tally.wins()).isEqualTo(4);
@@ -141,10 +141,10 @@ class WorkbenchHarnessTest {
                 row("c", "baseline", "2", "FAILED", List.of()),
                 row("d", "baseline", "3", "CANCELLED", List.of()));
 
-        var tally = ReportMath.factionTallies(rows).get(new ReportMath.Key("baseline", "random-v1", 3, "ERASERS"));
+        var tally = ReportMath.factionTallies(rows).get(new ReportMath.Key("baseline", Manifests.RANDOM, 3, "ERASERS"));
 
         assertThat(tally.games()).isEqualTo(2);
-        assertThat(ReportMath.independentBlocks(rows, "baseline", "random-v1", 3))
+        assertThat(ReportMath.independentBlocks(rows, "baseline", Manifests.RANDOM, 3))
                 .isEqualTo(1);
     }
 
@@ -154,7 +154,7 @@ class WorkbenchHarnessTest {
                 variant,
                 seed,
                 3,
-                "random-v1",
+                Manifests.RANDOM,
                 state,
                 "SUCCEEDED".equals(state) ? "WIN_CONDITION_MET" : null,
                 List.of("ERASERS", "PROPHETS", "WEAVERS"),

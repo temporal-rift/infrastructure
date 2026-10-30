@@ -18,8 +18,8 @@ final class Manifests {
     static final Map<String, Number> CANDIDATE_OVERRIDES = Map.of("game.rules.win-score-threshold", 22);
 
     static final int PARAMETER_SPACE_VERSION = 1;
-    static final String RANDOM = "random-v1";
-    static final String GREEDY = "faction-greedy-v1";
+    static final String RANDOM = "random";
+    static final String GREEDY = "faction-greedy";
 
     private static final ObjectMapper JSON = new ObjectMapper();
 
