@@ -32,7 +32,7 @@ import tools.jackson.databind.JsonNode;
  */
 class DesignerJourneyIT {
 
-    private static final String DRAFT_KEY = "workbench.experiment-draft.v1";
+    private static final String DRAFT_KEY = "workbench.experiment-draft.v2";
     private static final Duration UI_WAIT = Duration.ofSeconds(60);
     private static final Duration RUN_WAIT = Duration.ofMinutes(Integer.getInteger("workbenchE2e.journeyMinutes", 30));
 
@@ -205,32 +205,31 @@ class DesignerJourneyIT {
             manifest.get("variants").forEach(variant -> {
                 var entry = variants.addObject();
                 entry.put("label", variant.get("label").asString());
-                entry.putObject("rulesArtifact")
-                        .put("digest", variant.at("/rulesArtifact/digest").asString());
-                entry.putObject("contentArtifact")
-                        .put("digest", variant.at("/contentArtifact/digest").asString());
-                entry.put(
+                // The variant's baseline, whole, as the form keeps the bundle it was chosen from.
+                var bundle = entry.putObject("bundle");
+                bundle.set("rulesArtifact", variant.get("rulesArtifact").deepCopy());
+                bundle.set("contentArtifact", variant.get("contentArtifact").deepCopy());
+                bundle.put(
                         "effectiveRulesDigest",
                         variant.get("effectiveRulesDigest").asString());
-                entry.put(
+                bundle.put(
                         "effectiveContentDigest",
                         variant.get("effectiveContentDigest").asString());
-            });
-            var services = draft.putObject("services");
-            for (var name : List.of("gameService", "timelineService", "readService")) {
-                var service = services.putObject(name);
-                service.put(
-                        "imageDigest",
-                        manifest.at("/services/" + name + "/imageDigest").asString());
-                service.put(
-                        "sourceRevision",
-                        manifest.at("/services/" + name + "/sourceRevision").asString());
-            }
-            var contracts = draft.putArray("contracts");
-            manifest.get("contracts").properties().forEach(contract -> {
-                var entry = contracts.addObject();
-                entry.put("module", contract.getKey());
-                entry.put("version", contract.getValue().asString());
+                bundle.set("services", manifest.get("services").deepCopy());
+                bundle.set("contracts", manifest.get("contracts").deepCopy());
+                var space = variant.path("parameterSpaceVersion");
+                if (space.isMissingNode()) {
+                    entry.putNull("parameterSpaceVersion");
+                } else {
+                    entry.put("parameterSpaceVersion", space.asInt());
+                }
+                var overrides = entry.putArray("overrides");
+                variant.path("overrides")
+                        .properties()
+                        .forEach(override -> overrides
+                                .addObject()
+                                .put("key", override.getKey())
+                                .put("value", override.getValue().asString()));
             });
             var policies = draft.putArray("policies");
             manifest.get("policies").forEach(policy -> {
