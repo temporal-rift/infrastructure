@@ -811,7 +811,7 @@ class WorkbenchMilestoneIT {
         var readGames = new HashMap<String, Set<String>>();
         var control = issuer.token("workbench-operator", Issuer.CONTROL);
         var latest = new JsonNode[1];
-        await("the two sequential cases to finish")
+        await("the sequential cases to finish")
                 .atMost(FIXTURE_TIMEOUT)
                 .pollInterval(Duration.ofSeconds(1))
                 .until(() -> {
@@ -825,9 +825,10 @@ class WorkbenchMilestoneIT {
                 });
         var run = latest[0];
 
+        // CYCLIC plays the one three-faction set in each of its three seat rotations, for each variant.
         assertThat(run.path("counts").path("succeeded").asInt())
-                .as("both variants play to success: %s", run)
-                .isEqualTo(2);
+                .as("every rotation of both variants plays to success: %s", run)
+                .isEqualTo(spec.variants().size() * 3);
         var summaries = designer.caseSummaries(runId, null, null);
         assertThat(summaries.stream()
                         .map(summary -> summary.path("variantLabel").asString())
