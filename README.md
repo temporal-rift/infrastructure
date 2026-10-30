@@ -620,7 +620,8 @@ and provisioning refuses a lane whose document is missing or whose canonical pro
 ### Run locally
 
 Needs the `game-service`, `timeline-service`, `read-service` and `simulation-workbench` checkouts as siblings, Docker
-Compose 2.24.4+, Maven 4 and a `MAVEN_SETTINGS` value holding your Maven settings:
+Compose 2.24.4+, Maven 4 and a `MAVEN_SETTINGS` value holding your Maven settings. On Windows, run every command below
+from Git Bash against Docker Desktop:
 
 ```bash
 export MAVEN_SETTINGS="$(cat ~/.m2/settings.xml)"
