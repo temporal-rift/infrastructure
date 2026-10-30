@@ -841,7 +841,11 @@ class WorkbenchMilestoneIT {
             var attempts = designer.caseDetail(runId, summary.path("caseId").asString())
                     .path("attempts");
             var gameId = attempts.path(attempts.size() - 1).path("gameId").asString();
-            assertThat(readGames.getOrDefault(caseKey, Set.of()))
+            var sampled = readGames.getOrDefault(caseKey, Set.of());
+            assertThat(sampled)
+                    .as("no read-service sample was taken while case %s was open: %s", caseKey, readGames)
+                    .isNotEmpty();
+            assertThat(sampled)
                     .as("the games read-service held while case %s was open: %s", caseKey, readGames)
                     .containsExactly(gameId);
         }
