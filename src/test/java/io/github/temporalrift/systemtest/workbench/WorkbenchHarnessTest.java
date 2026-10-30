@@ -3,6 +3,7 @@ package io.github.temporalrift.systemtest.workbench;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -170,6 +171,25 @@ class WorkbenchHarnessTest {
         assertThat(ReportMath.reported(5.0 / 18)).isEqualTo(0.277778);
         assertThat(ReportMath.reported(0.0000025)).isEqualTo(0.000002);
         assertThat(ReportMath.reported(0.4)).isEqualTo(0.4);
+    }
+
+    @Test
+    void aWaitRetriesTransportFailuresAndServerErrorsButNotClientErrors() {
+        assertThat(Workbench.retryable(new Http.Response(-1, "Connection refused")))
+                .isFalse();
+        assertThat(Workbench.retryable(new Http.Response(503, ""))).isFalse();
+        assertThatThrownBy(() -> Workbench.retryable(new Http.Response(404, "no run")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("404");
+    }
+
+    @Test
+    void awaitingARunThatWasNeverLaunchedFailsAtOnce() {
+        var workbench = new Workbench("http://localhost:1", "token");
+
+        assertThatThrownBy(() -> workbench.awaitRun(null, run -> true, Duration.ofHours(3), "a run"))
+                .isInstanceOf(NullPointerException.class)
+                .hasMessageContaining("did not succeed");
     }
 
     private static CaseRow row(String id, String variant, String seed, String state, List<String> winners) {
