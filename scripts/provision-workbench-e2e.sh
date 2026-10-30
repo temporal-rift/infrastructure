@@ -8,7 +8,9 @@
 # Usage: bash scripts/provision-workbench-e2e.sh
 #
 # Requires the game-service, timeline-service, read-service and simulation-workbench checkouts as siblings
-# of this repository, and MAVEN_SETTINGS (Maven settings with a `github` server entry) for the image builds.
+# of this repository, and MAVEN_SETTINGS (Maven settings with a `github` server entry) for the image builds. The
+# simulation-workbench checkout must contain the revision that closes each case on read-service too
+# (workbench_e2e_min_workbench_revision in lib/workbench-e2e.sh); provisioning refuses an older one.
 #
 # Optional environment:
 #   WORKBENCH_E2E_LANES     Number of lanes, at least 1 (default 2). Every lane serves the baseline bundle;
@@ -38,6 +40,7 @@ for dir in game-service timeline-service read-service simulation-workbench; do
   [[ -d "$workspace/$dir" ]] || fail "sibling checkout not found: $workspace/$dir."
 done
 [[ -n "${MAVEN_SETTINGS:-}" ]] || fail "MAVEN_SETTINGS must hold the Maven settings used by the image builds."
+reason="$(workbench_e2e_require_workbench_revision "$workspace/simulation-workbench" 2>&1)" || fail "$reason"
 
 export WORKBENCH_E2E_REPO="$repo_root"
 export WORKBENCH_E2E_WORKSPACE="$workspace"

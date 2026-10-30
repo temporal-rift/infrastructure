@@ -207,4 +207,32 @@ g,20%%,2GiB / 15GiB
   grep -q "not a performance claim" <<< "$summary" || fail "the summary must disclaim performance claims"
 fi
 
+# --- workbench checkout revision gate ---------------------------------------------------------------------------
+
+# shellcheck source=lib/workbench-e2e.sh
+source "$repo_root/scripts/lib/workbench-e2e.sh"
+checkout="$work/workbench-checkout"
+git init -q "$checkout"
+git -C "$checkout" -c user.name=t -c user.email=t@t commit -q --allow-empty -m older
+older="$(git -C "$checkout" rev-parse HEAD)"
+git -C "$checkout" -c user.name=t -c user.email=t@t commit -q --allow-empty -m required
+required="$(git -C "$checkout" rev-parse HEAD)"
+git -C "$checkout" -c user.name=t -c user.email=t@t commit -q --allow-empty -m newer
+
+workbench_e2e_min_workbench_revision="$required"
+workbench_e2e_require_workbench_revision "$checkout" 2> /dev/null \
+  || fail "a checkout containing the required revision must pass"
+git -C "$checkout" checkout -q "$older"
+error="$(workbench_e2e_require_workbench_revision "$checkout" 2>&1)" \
+  && fail "a checkout predating the required revision must fail"
+grep -qF "predates revision ${required:0:7}" <<< "$error" \
+  || fail "the failure must name the required revision, got: $error"
+workbench_e2e_min_workbench_revision="0000000000000000000000000000000000000000"
+workbench_e2e_require_workbench_revision "$checkout" 2> /dev/null \
+  && fail "a checkout that does not know the required revision must fail"
+mkdir "$work/not-a-checkout"
+error="$(workbench_e2e_require_workbench_revision "$work/not-a-checkout" 2>&1)" \
+  && fail "a directory that is not a git checkout must fail"
+grep -qF "not a git checkout" <<< "$error" || fail "the failure must say the directory is not a checkout, got: $error"
+
 echo "Workbench E2E scripts fixtures passed."
