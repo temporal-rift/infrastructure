@@ -2,10 +2,14 @@ package io.github.temporalrift.systemtest.workbench;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
@@ -124,7 +128,7 @@ class AccessBoundariesIT {
                 "sleep",
                 "86400");
 
-        var process = new ProcessBuilder("bash", "scripts/cleanup-workbench-e2e.sh", "--list")
+        var process = new ProcessBuilder(bash(), "scripts/cleanup-workbench-e2e.sh", "--list")
                 .redirectErrorStream(true)
                 .start();
         var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
@@ -139,5 +143,23 @@ class AccessBoundariesIT {
                 .doesNotContain("decoy");
         assertThat(Docker.containerExists("com.temporal-rift.owner=someone-else"))
                 .isTrue();
+    }
+
+    /**
+     * The bash on PATH. Windows looks in its own system directory before PATH, and the bash.exe there starts WSL,
+     * which cannot reach this host's Docker, so on Windows this skips that directory (leaving Git Bash's).
+     */
+    private static String bash() {
+        if (!System.getProperty("os.name").startsWith("Windows")) {
+            return "bash";
+        }
+        var systemRoot = Path.of(System.getenv("SystemRoot"));
+        return Stream.of(System.getenv("PATH").split(File.pathSeparator))
+                .filter(entry -> !entry.isBlank())
+                .map(entry -> Path.of(entry, "bash.exe"))
+                .filter(candidate -> !candidate.startsWith(systemRoot) && Files.isRegularFile(candidate))
+                .findFirst()
+                .map(Path::toString)
+                .orElseThrow(() -> new IllegalStateException("No bash.exe on PATH outside " + systemRoot));
     }
 }
