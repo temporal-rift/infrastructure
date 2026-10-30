@@ -441,8 +441,9 @@ attribution without secrets. `effectiveRulesDigest` identifies the rules meaning
 `properties`; `rulesArtifactDigest` identifies the retained `effective-rules.json` artifact.
 `verify-simulation-deployment.sh` fails before startup on any missing or drifted input
 (`MANIFEST_MISMATCH`) and on any lane service that does not pin `simulation-control-api` 2.1.0 or a later 2.x,
-naming the service and its pin, and `check-simulation-readiness.sh` requires both services
-drained on the same bundle plus downstream watermark observation before gameplay.
+naming the service and its pin, and `check-simulation-readiness.sh` requires game-service and
+timeline-service drained on the same bundle plus downstream watermark observation before gameplay;
+read-service only consumes, so it has no outbox or timers to drain.
 Teardown removes only the named lane project; durable workbench evidence lives outside
 it. See `simulation/README.md` for the exact provision, readiness, cancellation, and
 validation commands.
