@@ -219,6 +219,8 @@ git -C "$checkout" -c user.name=t -c user.email=t@t commit -q --allow-empty -m r
 required="$(git -C "$checkout" rev-parse HEAD)"
 git -C "$checkout" -c user.name=t -c user.email=t@t commit -q --allow-empty -m newer
 
+[[ "$workbench_e2e_min_workbench_revision" =~ ^[0-9a-f]{40}$ ]] \
+  || fail "the shipped minimum workbench revision must be a full 40-character commit hash"
 workbench_e2e_min_workbench_revision="$required"
 workbench_e2e_require_workbench_revision "$checkout" 2> /dev/null \
   || fail "a checkout containing the required revision must pass"
@@ -228,8 +230,10 @@ error="$(workbench_e2e_require_workbench_revision "$checkout" 2>&1)" \
 grep -qF "predates revision ${required:0:7}" <<< "$error" \
   || fail "the failure must name the required revision, got: $error"
 workbench_e2e_min_workbench_revision="0000000000000000000000000000000000000000"
-workbench_e2e_require_workbench_revision "$checkout" 2> /dev/null \
+error="$(workbench_e2e_require_workbench_revision "$checkout" 2>&1)" \
   && fail "a checkout that does not know the required revision must fail"
+grep -qF "does not contain revision" <<< "$error" \
+  || fail "a missing revision must be reported as missing, not as predating, got: $error"
 mkdir "$work/not-a-checkout"
 error="$(workbench_e2e_require_workbench_revision "$work/not-a-checkout" 2>&1)" \
   && fail "a directory that is not a git checkout must fail"

@@ -53,6 +53,8 @@ workbench_e2e_require_workbench_revision() {
   local dir="$1" short="${workbench_e2e_min_workbench_revision:0:7}"
   git -C "$dir" rev-parse --git-dir > /dev/null 2>&1 \
     || { echo "$dir is not a git checkout, so its revision cannot be checked against $short." >&2; return 1; }
+  git -C "$dir" cat-file -e "${workbench_e2e_min_workbench_revision}^{commit}" 2> /dev/null \
+    || { echo "the simulation-workbench checkout at $dir does not contain revision $short, which closes each case on read-service; fetch it (a shallow clone may need to be deepened)." >&2; return 1; }
   git -C "$dir" merge-base --is-ancestor "$workbench_e2e_min_workbench_revision" HEAD 2> /dev/null \
-    || { echo "the simulation-workbench checkout at $dir predates revision $short, which closes each case on read-service; fetch and update it." >&2; return 1; }
+    || { echo "the simulation-workbench checkout at $dir predates revision $short, which closes each case on read-service; update it." >&2; return 1; }
 }
