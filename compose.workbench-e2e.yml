@@ -32,6 +32,7 @@ services:
         {"requestParam":"scope","match":"simulation:control","claims":{"scope":"simulation:control"}},
         {"requestParam":"scope","match":"simulation:read simulation:write simulation:observe","claims":{"scope":"simulation:read simulation:write simulation:observe"}},
         {"requestParam":"scope","match":"simulation:read simulation:write","claims":{"scope":"simulation:read simulation:write"}},
+        {"requestParam":"scope","match":"simulation:read","claims":{"scope":"simulation:read"}},
         {"requestParam":"subject","match":"designer","claims":{"scope":"simulation:read simulation:write simulation:observe","preferred_username":"designer"}},
         {"requestParam":"subject","match":"analyst","claims":{"scope":"simulation:read simulation:write","preferred_username":"analyst"}},
         {"requestParam":"subject","match":"reader","claims":{"scope":"simulation:read","preferred_username":"reader"}},
