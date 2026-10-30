@@ -97,8 +97,9 @@ answers the operator's checkpoint read with `409 EXECUTION_NOT_CONFIGURED`.
 ## Readiness before gameplay
 
 `check-simulation-readiness.sh` requires an operator token and the expected bundle
-digest. It requires game-service and timeline-service drained on the same digest — no pending outbox,
-continuation, or due-timer work; read-service only consumes, so it has none to drain — and then prints the per-source/group watermarks.
+digest. It requires game-service and timeline-service drained on the same digest — no pending
+outbox, continuation, or due-timer work; read-service only consumes, so it has none to drain —
+and then prints the per-source/group watermarks.
 A locally drained checkpoint is not global quiescence: the runner must additionally
 observe the causal messages at the downstream consumers before treating the lane as
 ready. Independent topic ordering is preserved throughout.
