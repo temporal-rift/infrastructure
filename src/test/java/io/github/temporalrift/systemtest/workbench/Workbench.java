@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Predicate;
 
@@ -101,13 +102,17 @@ final class Workbench {
         return get("/api/v1/runs/" + runId).requireStatus(200).json();
     }
 
-    /** Polls a run until the predicate holds; transient transport failures (for example a restart) are retried. */
+    /**
+     * Polls a run until the predicate holds. Transport failures and server errors (for example a restart) are retried;
+     * a client error means the run cannot appear, so it fails at once.
+     */
     JsonNode awaitRun(String runId, Predicate<JsonNode> condition, Duration timeout, String description) {
+        Objects.requireNonNull(runId, "No run to await: the test that launches it did not succeed");
         var latest = new JsonNode[1];
         await(description).atMost(timeout).pollInterval(Duration.ofSeconds(5)).until(() -> {
             var response = get("/api/v1/runs/" + runId);
             if (response.status() != 200) {
-                return false;
+                return retryable(response);
             }
             latest[0] = response.json();
             return condition.test(latest[0]);
@@ -174,8 +179,13 @@ final class Workbench {
         return post("/api/v1/runs/" + runId + "/cases/" + caseId + "/reproductions", null, key);
     }
 
-    /** Repeats the reproduction request, which returns the same reproduction in whatever state it reached. */
+    /**
+     * Repeats the reproduction request, which returns the same reproduction in whatever state it reached. Like
+     * {@link #awaitRun}, it retries transport failures and server errors and fails at once on a client error.
+     */
     JsonNode awaitReproduction(String runId, String caseId, UUID key, Duration timeout) {
+        Objects.requireNonNull(runId, "No run to reproduce from: the test that launches it did not succeed");
+        Objects.requireNonNull(caseId, "No case to reproduce: the test that selects it did not succeed");
         var latest = new JsonNode[1];
         await("reproduction of case " + caseId + " to finish")
                 .atMost(timeout)
@@ -183,7 +193,7 @@ final class Workbench {
                 .until(() -> {
                     var response = reproduce(runId, caseId, key);
                     if (response.status() != 202) {
-                        return false;
+                        return retryable(response);
                     }
                     latest[0] = response.json();
                     return switch (latest[0].path("state").asString()) {
@@ -192,5 +202,13 @@ final class Workbench {
                     };
                 });
         return latest[0];
+    }
+
+    /** Not yet: a transport failure (status -1) or a server error. A client error is final, so it fails the wait. */
+    static boolean retryable(Http.Response response) {
+        if (response.status() >= 400 && response.status() < 500) {
+            throw new AssertionError("HTTP " + response.status() + " cannot resolve by waiting: " + response.body());
+        }
+        return false;
     }
 }
