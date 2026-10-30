@@ -125,9 +125,8 @@ class WorkbenchRecoveryIT {
     @Test
     @Order(3)
     void resumingRunsOnlyUnfinishedCasesAndNeverRecountsFinishedOnes() {
-        designer.post("/api/v1/runs/" + runId + "/resume", null, null).requireStatus(202);
-        assertThat(designer.post("/api/v1/runs/" + runId + "/resume", null, null)
-                        .status())
+        designer.resume(runId, UUID.randomUUID()).requireStatus(202);
+        assertThat(designer.resume(runId, UUID.randomUUID()).status())
                 .as("a run that is no longer interrupted cannot be resumed again")
                 .isEqualTo(409);
 
@@ -144,7 +143,7 @@ class WorkbenchRecoveryIT {
     @Test
     @Order(4)
     void cancellingPreservesResultsAndRepeatingItChangesNothing() {
-        designer.post("/api/v1/runs/" + runId + "/cancel", null, null).requireStatus(202);
+        designer.cancel(runId, UUID.randomUUID()).requireStatus(202);
         var cancelled = designer.awaitRun(
                 runId,
                 current -> "CANCELLED".equals(current.path("state").asString()),
@@ -158,9 +157,7 @@ class WorkbenchRecoveryIT {
         assertThat(counts.path("succeeded").asInt()).isGreaterThanOrEqualTo(retained.size());
         assertRetainedUnchanged();
 
-        assertThat(designer.post("/api/v1/runs/" + runId + "/cancel", null, null)
-                        .status())
-                .isEqualTo(200);
+        assertThat(designer.cancel(runId, UUID.randomUUID()).status()).isEqualTo(200);
         assertThat(designer.run(runId).path("counts")).isEqualTo(counts);
 
         var cancelledCase = designer.caseSummaries(runId, "CANCELLED", null).getFirst();

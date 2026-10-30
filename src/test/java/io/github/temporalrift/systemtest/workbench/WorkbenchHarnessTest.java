@@ -148,6 +148,30 @@ class WorkbenchHarnessTest {
                 .isEqualTo(1);
     }
 
+    @Test
+    void onlyScoreThresholdWinnersAreHeldToTheThreshold() {
+        var row = CaseRow.of(Http.JSON.readTree("""
+                {"caseId":"c","variantLabel":"candidate","seed":"42","playerCount":3,"state":"SUCCEEDED",
+                 "assignments":[{"faction":"ACTIVISTS","policyId":"random"},{"faction":"ERASERS","policyId":"random"},
+                                {"faction":"WEAVERS","policyId":"random"}],
+                 "result":{"endReason":"WIN_CONDITION_MET",
+                           "winners":[{"seatIndex":0,"faction":"ACTIVISTS","winType":"FACTION_OBJECTIVE"},
+                                      {"seatIndex":2,"faction":"WEAVERS","winType":"SCORE_THRESHOLD"}],
+                           "finalScores":[{"seatIndex":0,"score":17},{"seatIndex":1,"score":3},
+                                          {"seatIndex":2,"score":22}]}}
+                """));
+
+        assertThat(row.winners()).containsExactly("ACTIVISTS", "WEAVERS");
+        assertThat(row.scoreThresholdWinnerSeats()).containsExactly(2);
+    }
+
+    @Test
+    void reportedFiguresRoundHalfEvenToSixDecimals() {
+        assertThat(ReportMath.reported(5.0 / 18)).isEqualTo(0.277778);
+        assertThat(ReportMath.reported(0.0000025)).isEqualTo(0.000002);
+        assertThat(ReportMath.reported(0.4)).isEqualTo(0.4);
+    }
+
     private static CaseRow row(String id, String variant, String seed, String state, List<String> winners) {
         return new CaseRow(
                 id,
@@ -159,6 +183,7 @@ class WorkbenchHarnessTest {
                 "SUCCEEDED".equals(state) ? "WIN_CONDITION_MET" : null,
                 List.of("ERASERS", "PROPHETS", "WEAVERS"),
                 winners,
+                List.of(),
                 new TreeMap<>(Map.of(0, 10, 1, 8, 2, 6)));
     }
 }
