@@ -41,3 +41,18 @@ workbench_e2e_mint() {
   curl "${args[@]}" "$workbench_e2e_issuer_url/token" \
     | sed -n 's/.*"access_token" *: *"\([^"]*\)".*/\1/p'
 }
+
+# The simulation-workbench revision that closes each lane case on read-service as well as game-service and
+# timeline-service. The workbench image is built from the sibling checkout, so an older checkout provisions cleanly
+# and then never closes a case's context on read-service.
+workbench_e2e_min_workbench_revision="f7270ae0efab4964ec0f634590244bd35e615cbd"
+
+# Succeeds when the workbench checkout contains the minimum revision; otherwise prints why to stderr and fails.
+# Usage: workbench_e2e_require_workbench_revision <checkout-dir>
+workbench_e2e_require_workbench_revision() {
+  local dir="$1" short="${workbench_e2e_min_workbench_revision:0:7}"
+  git -C "$dir" rev-parse --git-dir > /dev/null 2>&1 \
+    || { echo "$dir is not a git checkout, so its revision cannot be checked against $short." >&2; return 1; }
+  git -C "$dir" merge-base --is-ancestor "$workbench_e2e_min_workbench_revision" HEAD 2> /dev/null \
+    || { echo "the simulation-workbench checkout at $dir predates revision $short, which closes each case on read-service; fetch and update it." >&2; return 1; }
+}
