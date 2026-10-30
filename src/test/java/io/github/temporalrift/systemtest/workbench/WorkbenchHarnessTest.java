@@ -178,7 +178,8 @@ class WorkbenchHarnessTest {
         assertThat(Workbench.retryable(new Http.Response(-1, "Connection refused")))
                 .isFalse();
         assertThat(Workbench.retryable(new Http.Response(503, ""))).isFalse();
-        assertThatThrownBy(() -> Workbench.retryable(new Http.Response(404, "no run")))
+        var notFound = new Http.Response(404, "no run");
+        assertThatThrownBy(() -> Workbench.retryable(notFound))
                 .isInstanceOf(AssertionError.class)
                 .hasMessageContaining("404");
     }
@@ -186,8 +187,9 @@ class WorkbenchHarnessTest {
     @Test
     void awaitingARunThatWasNeverLaunchedFailsAtOnce() {
         var workbench = new Workbench("http://localhost:1", "token");
+        var timeout = Duration.ofHours(3);
 
-        assertThatThrownBy(() -> workbench.awaitRun(null, run -> true, Duration.ofHours(3), "a run"))
+        assertThatThrownBy(() -> workbench.awaitRun(null, run -> true, timeout, "a run"))
                 .isInstanceOf(NullPointerException.class)
                 .hasMessageContaining("did not succeed");
     }
