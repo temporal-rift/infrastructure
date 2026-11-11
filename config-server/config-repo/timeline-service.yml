@@ -7,6 +7,7 @@ game:
       momentum-bonus: 10
       rally-multiplier: 1.5
       thread-shift: 10
+      erased-weight-to-written-outcome: true
     paradox-resolution-timer-seconds: 120
   timers:
     paradox-resolution-sweep-interval: 1s

@@ -22,6 +22,7 @@ game:
     cards-per-hand: 5
     cards-per-deal: 7
     win-score-threshold: 20
+    annihilate-earliest-round: 2
     victory:
       eraser-annihilations: 4
       prophet-written-resolutions: 4
@@ -59,6 +60,7 @@ game:
       - REWEAVE
     hand-deal-forced-types: []
     scoring:
+      written-outcome-shields-annihilation: true
       score-deltas:
         ANNIHILATED_OUTCOME: 3
         CORRUPTED_OPPONENT_CARD: 2
