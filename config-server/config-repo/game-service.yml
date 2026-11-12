@@ -23,6 +23,7 @@ game:
     cards-per-deal: 7
     win-score-threshold: 20
     annihilate-earliest-round: 2
+    rewrite-latest-round: 2
     victory:
       eraser-annihilations: 4
       prophet-written-resolutions: 4
@@ -58,9 +59,12 @@ game:
       - CORRUPT
       - MIMIC
       - REWEAVE
+      - REWRITE
     hand-deal-forced-types: []
     scoring:
       written-outcome-shields-annihilation: true
+      expose-requires-declared-event: true
+      annihilation-requires-consequence: true
       score-deltas:
         ANNIHILATED_OUTCOME: 3
         CORRUPTED_OPPONENT_CARD: 2
@@ -68,6 +72,7 @@ game:
         FULFILLMENT_SUCCEEDED: 8
         EVENT_RESOLVED_DIFFERENTLY_THAN_WRITTEN: -2
         SECRET_OUTCOME_WON: 3
+        SECRET_OUTCOME_MISSED: -1
         MIMIC_NEVER_TRACED: 4
         MIMIC_CONTRIBUTED_TO_WIN: 1
         CHAIN_LINK_ADDED: 2
