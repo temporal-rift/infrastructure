@@ -24,11 +24,11 @@ game:
     win-score-threshold: 20
     annihilate-earliest-round: 2
     rewrite-latest-round: 2
+    # weaver-chain-length is shared with timeline-service and served from application.yml.
     victory:
       eraser-annihilations: 4
-      prophet-written-resolutions: 4
+      prophet-written-resolutions: 3
       revisionist-successful-eras: 3
-      weaver-chain-length: 3
       activist-consecutive-declarations: 3
     seal-max-uses-per-game: 2
     reconnect-grace-period-seconds: 30
@@ -51,6 +51,8 @@ game:
       II: 30
       III: 10
     stabilization:
+      # Off: five eras without a winner go to the highest score. On restores the Prophet and Weaver claims below.
+      faction-claims: false
       prophet-written-resolutions: 3
       weaver-active-chain-links: 2
     once-era-budgeted-specials:
@@ -82,3 +84,6 @@ game:
         DECLARED_OUTCOME_WON: 5
         EXPOSE_SIGNATURE_REVEALED: 2
         PARADOX_CASCADE_PENALTY: -2
+        DECLARED_OUTCOME_MISSED_WITH_RALLY: -2
+        DECLARED_OUTCOME_MISSED: -1
+        PARADOX_STABILIZED: -1
