@@ -1,10 +1,15 @@
 # Shared cross-service configuration served to every Config Client application/profile that has no more
 # specific override. game-service and read-service share max-eras; game-service and timeline-service share
-# the game.rules.probability namespace. Each service binds only the values it needs, so there is one served
-# copy of each rule rather than one per consuming service.
+# the game.rules.probability namespace, the Weaver chain length (game-service's objective, timeline-service's
+# chain completion) and the Foresight writing cap. Each service binds only the values it needs, so there is
+# one served copy of each rule rather than one per consuming service.
 game:
   rules:
     max-eras: 5
+    victory:
+      weaver-chain-length: 4
+    foresight:
+      writings-per-era: 1
     probability:
       floor: 0
       ceiling: 90

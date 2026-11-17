@@ -9,5 +9,9 @@ game:
       thread-shift: 10
       erased-weight-to-written-outcome: true
     paradox-resolution-timer-seconds: 120
+    # False: an annihilated protected link still raises CHAIN_CONFLICT; Tapestry only keeps the chain from breaking.
+    tapestry-absorbs-chain-conflict: false
+    paradox:
+      fate-contradiction: true
   timers:
     paradox-resolution-sweep-interval: 1s
