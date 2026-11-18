@@ -18,7 +18,11 @@ game:
     min-players: 3
     max-players: 5
     max-cascaded-paradoxes: 3
-    events-per-era: 3
+    # Keyed by player count: one event per player keeps every event equally contested at any table size.
+    events-per-era:
+      3: 3
+      4: 4
+      5: 5
     cards-per-hand: 5
     cards-per-deal: 7
     win-score-threshold: 20
@@ -30,6 +34,10 @@ game:
       prophet-written-resolutions: 3
       revisionist-successful-eras: 3
       activist-consecutive-declarations: 3
+      # In the final era each objective needs this many steps fewer, if the player advances it in that era.
+      final-era-objective-discount: 1
+      # On: the highest total among simultaneous qualifiers wins alone; tied special endings go to objective progress.
+      score-tiebreak: true
     seal-max-uses-per-game: 2
     reconnect-grace-period-seconds: 30
     action-round-timer-seconds:
@@ -67,6 +75,8 @@ game:
       written-outcome-shields-annihilation: true
       expose-requires-declared-event: true
       annihilation-requires-consequence: true
+      # On: a declaration or Rewrite whose outcome was annihilated that era is void, neither a win nor a miss.
+      erased-outcome-voids-bets: true
       score-deltas:
         ANNIHILATED_OUTCOME: 3
         CORRUPTED_OPPONENT_CARD: 2
@@ -86,4 +96,8 @@ game:
         PARADOX_CASCADE_PENALTY: -2
         DECLARED_OUTCOME_MISSED_WITH_RALLY: -2
         DECLARED_OUTCOME_MISSED: -1
-        PARADOX_STABILIZED: -1
+        # Clearing a paradox is free; tearing time costs the detonator.
+        PARADOX_STABILIZED: 0
+        PARADOX_DETONATED: -1
+        # Reserve dial, off: a negative value charges a leading erasure that changed no winner.
+        ANNIHILATION_WASTED: 0

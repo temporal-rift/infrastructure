@@ -1,13 +1,18 @@
 # Shared cross-service configuration served to every Config Client application/profile that has no more
 # specific override. game-service and read-service share max-eras; game-service and timeline-service share
 # the game.rules.probability namespace, the Weaver chain length (game-service's objective, timeline-service's
-# chain completion) and the Foresight writing cap. Each service binds only the values it needs, so there is
-# one served copy of each rule rather than one per consuming service.
+# chain completion), the Foresight writing cap and the paradox contest (timeline-service decides the cascade,
+# game-service scores it). Each service binds only the values it needs, so there is one served copy of each
+# rule rather than one per consuming service.
 game:
   rules:
     max-eras: 5
     victory:
-      weaver-chain-length: 4
+      weaver-chain-length: 3
+    paradox:
+      # On: a paradox clears only when its distinct stabilizers are at least its distinct detonators, and a
+      # cascade costs each detonator PARADOX_DETONATED on top of the base penalty every player pays.
+      detonate-contests-stabilize: true
     foresight:
       writings-per-era: 1
     probability:
