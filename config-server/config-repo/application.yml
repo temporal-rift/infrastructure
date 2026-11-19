@@ -8,7 +8,7 @@ game:
   rules:
     max-eras: 5
     victory:
-      weaver-chain-length: 3
+      weaver-chain-length: 4
     paradox:
       # On: a paradox clears only when its distinct stabilizers are at least its distinct detonators, and a
       # cascade costs each detonator PARADOX_DETONATED on top of the base penalty every player pays.
