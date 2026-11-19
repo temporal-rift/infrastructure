@@ -31,9 +31,16 @@ game:
     # weaver-chain-length is shared with timeline-service and served from application.yml.
     victory:
       eraser-annihilations: 4
+      # Table sizes whose Eraser objective differs from the value above, keyed by player count.
+      eraser-annihilations-by-player-count:
+        5: 3
       prophet-written-resolutions: 3
       revisionist-successful-eras: 3
       activist-consecutive-declarations: 3
+      # Whether an Activist's successful eras must be consecutive, for the table sizes that differ from the rule: at
+      # five players any three successful eras in total meet the objective.
+      activist-consecutive-eras-by-player-count:
+        5: false
       # In the final era each objective needs this many steps fewer, if the player advances it in that era.
       final-era-objective-discount: 1
       # On: the highest total among simultaneous qualifiers wins alone; tied special endings go to objective progress.
@@ -83,13 +90,15 @@ game:
         EVENT_RESOLVED_AS_WRITTEN: 4
         FULFILLMENT_SUCCEEDED: 8
         EVENT_RESOLVED_DIFFERENTLY_THAN_WRITTEN: -2
-        SECRET_OUTCOME_WON: 3
+        SECRET_OUTCOME_WON: 4
         SECRET_OUTCOME_MISSED: -1
         MIMIC_NEVER_TRACED: 4
         MIMIC_CONTRIBUTED_TO_WIN: 1
         CHAIN_LINK_ADDED: 2
         CHAIN_COMPLETED: 10
         CHAIN_BROKEN: -3
+        # A Thread whose event resolved with another winner; 0 turns the cost off.
+        CHAIN_LINK_MISSED: -1
         DECLARED_OUTCOME_WON_WITH_RALLY: 6
         DECLARED_OUTCOME_WON: 5
         EXPOSE_SIGNATURE_REVEALED: 2
