@@ -35,7 +35,12 @@ game:
       eraser-annihilations-by-player-count:
         5: 3
       prophet-written-resolutions: 3
+      # Table sizes whose Prophet and Revisionist objectives differ from the values on their own line, keyed by player count.
+      prophet-written-resolutions-by-player-count:
+        5: 3
       revisionist-successful-eras: 3
+      revisionist-successful-eras-by-player-count:
+        5: 3
       activist-consecutive-declarations: 3
       # Whether an Activist's successful eras must be consecutive, for the table sizes that differ from the rule: at
       # five players any three successful eras in total meet the objective.
