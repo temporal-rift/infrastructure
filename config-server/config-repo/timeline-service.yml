@@ -6,7 +6,8 @@ game:
     probability:
       momentum-bonus: 10
       rally-multiplier: 1.5
-      thread-shift: 10
+      # Off at 0: an accepted Thread opens the pending link but moves no probability.
+      thread-shift: 0
       erased-weight-to-written-outcome: true
     paradox-resolution-timer-seconds: 120
     # False: an annihilated protected link still raises CHAIN_CONFLICT; Tapestry only keeps the chain from breaking.
