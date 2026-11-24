@@ -85,8 +85,8 @@ class BrowserHarnessTest {
             IsolationCheck.assertEarnedIntelIsScoped("owner", ownCapture);
             var other = owner.deepCopy();
             other.putArray("myHand");
-            var otherExchange = stateExchange(other);
-            assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("other", List.of(otherExchange)))
+            var otherCapture = List.of(stateExchange(other));
+            assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("other", otherCapture))
                     .as("a %s grant belongs only to its recipient", kind)
                     .isInstanceOf(AssertionError.class);
         }
@@ -131,15 +131,12 @@ class BrowserHarnessTest {
     @Test
     void rejectedActionsAndOtherCardTypesCannotGrantIntel() {
         var scan = intelState("PROBABILITY", "SCAN");
-        var scanExchange = stateExchange(scan);
-        var rejectedGrant = acceptedInformationAction(1, 1, 422, "event", "opponent");
-        assertThatThrownBy(
-                        () -> IsolationCheck.assertEarnedIntelIsScoped("viewer", List.of(scanExchange, rejectedGrant)))
+        var scanCapture = List.of(stateExchange(scan), acceptedInformationAction(1, 1, 422, "event", "opponent"));
+        assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("viewer", scanCapture))
                 .isInstanceOf(AssertionError.class);
         var push = intelState("PROBABILITY", "PUSH");
-        var pushExchange = stateExchange(push);
-        var pushGrant = acceptedInformationAction(1, 1, 202, "event", "opponent");
-        assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("viewer", List.of(pushExchange, pushGrant)))
+        var pushCapture = List.of(stateExchange(push), acceptedInformationAction(1, 1, 202, "event", "opponent"));
+        assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("viewer", pushCapture))
                 .isInstanceOf(AssertionError.class);
     }
 
@@ -158,15 +155,14 @@ class BrowserHarnessTest {
                     acceptedInformationAction(2, 1, 202, "event", "opponent", kind),
                     acceptedInformationAction(1, 2, 202, "event", "opponent", kind),
                     acceptedInformationAction(1, 1, 202, "different-event", "different-player", kind))) {
-                assertThatThrownBy(() ->
-                                IsolationCheck.assertEarnedIntelIsScoped("viewer", List.of(stateCapture, wrongGrant)))
+                var wrongCapture = List.of(stateCapture, wrongGrant);
+                assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("viewer", wrongCapture))
                         .isInstanceOf(AssertionError.class);
             }
             state.put("gameId", "different-game");
-            var mismatchedExchange = stateExchange(state);
-            var mismatchedGrant = acceptedInformationAction(1, 1, 202, "event", "opponent", kind);
-            assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped(
-                            "viewer", List.of(mismatchedExchange, mismatchedGrant)))
+            var mismatchedCapture =
+                    List.of(stateExchange(state), acceptedInformationAction(1, 1, 202, "event", "opponent", kind));
+            assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("viewer", mismatchedCapture))
                     .isInstanceOf(AssertionError.class);
         }
     }
@@ -187,10 +183,9 @@ class BrowserHarnessTest {
         for (var phase : List.of("ERA_END", "GAME_ENDED")) {
             var state = intelState("PROBABILITY", "SCAN");
             state.put("phase", phase);
-            var expiredExchange = stateExchange(state);
-            var expiredGrant = acceptedInformationAction(1, 1, 202, "event", "opponent");
-            assertThatThrownBy(() ->
-                            IsolationCheck.assertEarnedIntelIsScoped("viewer", List.of(expiredExchange, expiredGrant)))
+            var expiredCapture =
+                    List.of(stateExchange(state), acceptedInformationAction(1, 1, 202, "event", "opponent"));
+            assertThatThrownBy(() -> IsolationCheck.assertEarnedIntelIsScoped("viewer", expiredCapture))
                     .isInstanceOf(AssertionError.class);
             state.putArray("myRevealedIntel");
             IsolationCheck.assertEarnedIntelIsScoped("viewer", List.of(stateExchange(state)));
