@@ -21,20 +21,19 @@ final class KafkaAuthorizerLog {
         // though this method's caller waits inside an Awaitility timeout, since a synchronous blocking read
         // in that same lambda can't be preempted by it.
         var outputFile = Files.createTempFile("kafka-authorizer-log-", ".txt");
-        try {
-            var process = new ProcessBuilder(
-                            "docker",
-                            "compose",
-                            "-f",
-                            "compose.secure.yml",
-                            "exec",
-                            "-T",
-                            "kafka-secure",
-                            "cat",
-                            "/opt/kafka/logs/kafka-authorizer.log")
-                    .redirectErrorStream(true)
-                    .redirectOutput(outputFile.toFile())
-                    .start();
+        try (var process = new ProcessBuilder(
+                        "docker",
+                        "compose",
+                        "-f",
+                        "compose.secure.yml",
+                        "exec",
+                        "-T",
+                        "kafka-secure",
+                        "cat",
+                        "/opt/kafka/logs/kafka-authorizer.log")
+                .redirectErrorStream(true)
+                .redirectOutput(outputFile.toFile())
+                .start()) {
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 throw new IllegalStateException(
