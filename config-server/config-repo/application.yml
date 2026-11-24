@@ -1,12 +1,15 @@
 # Shared cross-service configuration served to every Config Client application/profile that has no more
 # specific override. game-service and read-service share max-eras; game-service and timeline-service share
 # the game.rules.probability namespace, the Weaver chain length (game-service's objective, timeline-service's
-# chain completion), the Foresight writing cap and the paradox contest (timeline-service decides the cascade,
-# game-service scores it). Each service binds only the values it needs, so there is one served copy of each
-# rule rather than one per consuming service.
+# chain completion), the faction-bet window, the Foresight writing cap and the paradox contest
+# (timeline-service decides the cascade, game-service scores it). Each service binds only the values it needs,
+# so there is one served copy of each rule rather than one per consuming service.
 game:
   rules:
     max-eras: 5
+    # Latest round in which faction bets close: Thread, Reweave, Rewrite and Fulfillment are accepted in rounds
+    # 1 through this round, and a Foresight played later previews but writes nothing.
+    faction-bet-latest-round: 2
     victory:
       weaver-chain-length: 4
     paradox:
