@@ -908,6 +908,7 @@ class TemporalRiftSystemIT {
             for (var state : states.values()) {
                 assertThat(state.players())
                         .as("factions stay hidden before FactionRevealed (era %d round %d)", eraNumber, round)
+                        .isNotEmpty()
                         .allSatisfy(view -> assertThat(view.faction()).isNull());
             }
             for (var player : players) {
@@ -1377,6 +1378,7 @@ class TemporalRiftSystemIT {
                     laterState.hand().stream().map(Card::cardInstanceId).collect(Collectors.toSet());
             assertThat(laterCardIds)
                     .as("%s's later-era hand reuses none of era one's card instances", player.name())
+                    .isNotEmpty()
                     .doesNotContainAnyElementsOf(eraOneCardIds);
 
             var history = scenario.awaitGameHistory(
