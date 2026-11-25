@@ -30,6 +30,13 @@ game:
     # weaver-chain-length is shared with timeline-service and served from application.yml.
     victory:
       eraser-annihilations: 4
+      # Table sizes whose Eraser objective or Activist streak differ from the rule, keyed by player count. Five players
+      # follow the rule (four annihilations, consecutive eras); the values are served so that every key a simulation
+      # variant may override has a baseline.
+      eraser-annihilations-by-player-count:
+        5: 4
+      activist-consecutive-eras-by-player-count:
+        5: true
       prophet-written-resolutions: 3
       # Table sizes whose Prophet and Revisionist objectives differ from the values on their own line, keyed by player count.
       prophet-written-resolutions-by-player-count:
