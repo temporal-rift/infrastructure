@@ -3,6 +3,7 @@ package io.github.temporalrift.systemtest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
@@ -84,6 +85,33 @@ final class KafkaEventProbe implements AutoCloseable {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Reads every real {@code OutcomeApplied} fact one game published, so a scenario
+     * can compare what timeline decided (winner and {@code consequentialErasures}) with what game-service scored.
+     * Use a probe dedicated to this call: it keeps polling until no matching record arrives for {@code quiet}, and
+     * every other record it polls past is discarded. The caller must only call it once the game's eras have resolved.
+     */
+    List<JsonNode> drainOutcomesApplied(UUID gameId, Duration quiet, Duration timeout) {
+        var outcomes = new ArrayList<JsonNode>();
+        var deadline = Instant.now().plus(timeout);
+        var lastActivity = Instant.now();
+        while (Instant.now().isBefore(deadline) && Instant.now().isBefore(lastActivity.plus(quiet))) {
+            var polled = consumer.poll(Duration.ofMillis(500));
+            if (!polled.isEmpty()) {
+                // Any record counts as activity: the shared topic can hold a long backlog of other scenarios'
+                // facts that has to be read past before this game's own records arrive.
+                lastActivity = Instant.now();
+            }
+            for (var consumerRecord : polled) {
+                if ("OutcomeApplied".equals(header(consumerRecord.headers(), "eventType"))
+                        && gameId.toString().equals(header(consumerRecord.headers(), "gameId"))) {
+                    outcomes.add(objectMapper.readTree(consumerRecord.value()));
+                }
+            }
+        }
+        return outcomes;
     }
 
     /** Extracts one (event, outcome)'s band from a publication returned by {@link #awaitBandPublication}. */

@@ -71,6 +71,18 @@ final class TemporalRiftScenario {
                 description);
     }
 
+    ScoreHistory awaitScoreHistory(Actor actor, UUID gameId, Predicate<ScoreHistory> expected, String description) {
+        return eventually(
+                () -> {
+                    var response = as(actor).getScoreHistory(gameId);
+                    return response.status() == 200
+                            ? Optional.of(ScoreHistory.from(response.body()))
+                            : Optional.empty();
+                },
+                expected,
+                description);
+    }
+
     private static <T> T eventually(Supplier<Optional<T>> observation, Predicate<T> expected, String description) {
         var observed = new AtomicReference<T>();
         await().atMost(TRANSITION_TIMEOUT).pollInterval(Duration.ofMillis(200)).untilAsserted(() -> {
@@ -116,6 +128,20 @@ final class TemporalRiftScenario {
 
         JsonHttpClient.Response getGameHistory(UUID gameId) {
             return http.get(readUri("/games/" + gameId + "/history"), actor);
+        }
+
+        // Game-service's participant-scoped score history: the caller's own entitled reasons for every era.
+        JsonHttpClient.Response getScoreHistory(UUID gameId) {
+            return http.get(gameUri("/games/" + gameId + "/scores/history"), actor);
+        }
+
+        // The Activist's public Rally declaration, accepted only inside the declaration window before Round 1.
+        JsonHttpClient.Response declareRally(UUID gameId, int eraNumber, UUID targetEventId, UUID targetOutcomeId) {
+            var body = new LinkedHashMap<String, Object>();
+            body.put("specialAction", "RALLY");
+            body.put("targetEventId", targetEventId);
+            body.put("targetOutcomeId", targetOutcomeId);
+            return http.post(gameUri("/games/" + gameId + "/eras/" + eraNumber + "/declarations"), actor, body);
         }
 
         JsonHttpClient.Response playCard(
@@ -344,6 +370,35 @@ final class TemporalRiftScenario {
                     uuid(body, "playerId"), body.path("score").asInt(), nullableText(body.get("faction")));
         }
     }
+
+    // One era's score changes for the caller; `reason` is omitted by the API when the detail is not entitled.
+    record ScoreHistory(List<EraScoreDeltas> eras) {
+
+        static ScoreHistory from(JsonNode body) {
+            return new ScoreHistory(stream(body.path("history"))
+                    .map(era -> new EraScoreDeltas(
+                            era.path("eraNumber").asInt(),
+                            stream(era.path("deltas"))
+                                    .map(delta -> new ScoreDelta(
+                                            uuid(delta, "playerId"),
+                                            delta.path("pointsDelta").asInt(),
+                                            nullableText(delta.get("reason"))))
+                                    .toList()))
+                    .toList());
+        }
+
+        List<ScoreDelta> deltas(int eraNumber, UUID playerId, String reason) {
+            return eras.stream()
+                    .filter(era -> era.eraNumber() == eraNumber)
+                    .flatMap(era -> era.deltas().stream())
+                    .filter(delta -> delta.playerId().equals(playerId) && reason.equals(delta.reason()))
+                    .toList();
+        }
+    }
+
+    record EraScoreDeltas(int eraNumber, List<ScoreDelta> deltas) {}
+
+    record ScoreDelta(UUID playerId, int pointsDelta, String reason) {}
 
     record GameHistory(UUID gameId, List<EraHistory> eras) {
 

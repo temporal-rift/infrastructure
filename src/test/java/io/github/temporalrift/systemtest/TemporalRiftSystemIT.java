@@ -25,6 +25,7 @@ import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.TestWatcher;
+import tools.jackson.databind.JsonNode;
 
 import io.github.temporalrift.systemtest.TemporalRiftScenario.ActiveEvent;
 import io.github.temporalrift.systemtest.TemporalRiftScenario.Card;
@@ -847,6 +849,302 @@ class TemporalRiftSystemIT {
             assertThat(era.outcomes().size() + era.cascadedEvents().size())
                     .as("era %d history reflects resolved or cascaded outcomes", eraNumber)
                     .isGreaterThan(0);
+        }
+    }
+
+    // Five seats put every faction at the table, so the Revisionist, Eraser and Activist always play. Every action is
+    // chosen by this test, so each expected score is derived from what actually happened (the real winners and
+    // `consequentialErasures` timeline published) and compared with what game-service scored:
+    //   - Rewrite: the era's winner decides a hit (+4) or a miss (-1), through the served SECRET_OUTCOME_MISSED.
+    //   - Expose: +2 only when the exposed Round-1 signature is on the event the Activist declared that era. Era one
+    //     exposes a signature on the declared event, era two one on another event, so both branches are certain.
+    //   - Annihilate: a credit is only legal for an erasure timeline listed as consequential.
+    // The roll decides whether a given Rewrite hits and whether a given erasure changes the winner, so one game cannot
+    // force every branch of those two. The domain tests pin each branch; this test proves the services agree.
+    @Test
+    void contestedYieldRulesScoreTheSameWayTimelineAndGameServiceDecidedThem() {
+        var players = Stream.of("Host", "Player two", "Player three", "Player four", "Player five")
+                .map(Actor::named)
+                .toList();
+        try (var outcomeProbe = new KafkaEventProbe()) {
+            var gameId = startGameWithPlayers(players.getFirst(), players.subList(1, players.size()));
+            dealAndSelectHand(gameId, players, 1, TemporalRiftSystemIT::chooseHandKeepingPush);
+
+            var contestedEras = new ArrayList<ContestedEra>();
+            var previousEventIds = Set.<UUID>of();
+            for (var eraNumber = 1; eraNumber <= E2E_MAX_ERAS; eraNumber++) {
+                var era = playContestedEra(gameId, players, eraNumber, previousEventIds);
+                contestedEras.add(era);
+                previousEventIds = era.eventIds();
+
+                var currentEra = eraNumber;
+                var afterEra = players.stream()
+                        .collect(Collectors.toMap(
+                                player -> player, player -> awaitEraAdvancedOrGameEnded(player, gameId, currentEra)));
+                if ("GAME_ENDED".equals(afterEra.get(players.getFirst()).phase())) {
+                    break;
+                }
+                for (var player : players) {
+                    scenario.as(player)
+                            .selectHand(
+                                    gameId,
+                                    currentEra + 1,
+                                    chooseHandKeepingPush(afterEra.get(player).pendingHand()))
+                            .assertStatus(202);
+                }
+            }
+            for (var player : players) {
+                scenario.awaitPlayerState(
+                        player,
+                        gameId,
+                        candidate -> "GAME_ENDED".equals(candidate.phase()),
+                        player.name() + " reaches GAME_ENDED");
+            }
+
+            var outcomesApplied =
+                    outcomeProbe.drainOutcomesApplied(gameId, Duration.ofSeconds(5), Duration.ofMinutes(2));
+            for (var era : contestedEras) {
+                verifyContestedEraScores(gameId, era, outcomesApplied);
+            }
+        }
+    }
+
+    // One era's script: who plays what, and on which event, so the expectations can be derived afterwards.
+    private record ContestedEra(
+            int eraNumber,
+            Actor revisionist,
+            Actor eraser,
+            Actor activist,
+            UUID declaredEventId,
+            UUID rewriteEventId,
+            UUID rewriteOutcomeId,
+            UUID annihilatedEventId,
+            UUID annihilatedOutcomeId,
+            UUID exposedEventId,
+            Set<UUID> eventIds) {}
+
+    private ContestedEra playContestedEra(UUID gameId, List<Actor> players, int eraNumber, Set<UUID> previousEventIds) {
+        var states = new LinkedHashMap<Actor, PlayerState>();
+        for (var player : players) {
+            states.put(
+                    player,
+                    scenario.awaitPlayerState(
+                            player,
+                            gameId,
+                            candidate -> candidate.eraNumber() == eraNumber
+                                    && candidate.myFaction() != null
+                                    // Five seats draw five events per era (events-per-era by player count).
+                                    && candidate.activeEvents().size() >= 3
+                                    && candidate.activeEvents().stream()
+                                            .noneMatch(event -> previousEventIds.contains(event.eventId())),
+                            player.name() + " sees era " + eraNumber + "'s events and own faction"));
+        }
+        var byFaction = states.entrySet().stream()
+                .collect(Collectors.toMap(entry -> entry.getValue().myFaction(), Map.Entry::getKey));
+        assertThat(byFaction.keySet())
+                .as("five seats seat every faction")
+                .containsExactlyInAnyOrder("ERASERS", "PROPHETS", "REVISIONISTS", "WEAVERS", "ACTIVISTS");
+        var activist = byFaction.get("ACTIVISTS");
+        var revisionist = byFaction.get("REVISIONISTS");
+        var eraser = byFaction.get("ERASERS");
+        var weaver = byFaction.get("WEAVERS");
+
+        var events = states.get(activist).activeEvents();
+        // Era one: the Weaver's Push lands on the declared event, so Expose must score. Era two: on another event,
+        // so Expose must not. The Rewrite event and the erased event are kept apart from each other.
+        var declaredEvent = events.get(0);
+        var pushedEvent = eraNumber == 1 ? events.get(0) : events.get(1);
+        var rewriteEvent = events.get(2);
+        var annihilatedEvent = eraNumber == 1 ? events.get(1) : events.get(0);
+
+        declareRallyInsideTheWindow(activist, gameId, eraNumber, declaredEvent);
+
+        awaitEveryoneAtRound(players, gameId, eraNumber, 1);
+        scenario.as(revisionist)
+                .playSpecial(gameId, eraNumber, 1, "REWRITE", rewriteEvent.eventId(), targetOutcome(rewriteEvent))
+                .assertStatus(202);
+        var weaverRoundOne = scenario.awaitPlayerState(
+                weaver,
+                gameId,
+                candidate -> candidate.eraNumber() == eraNumber
+                        && "ACTION_ROUND_1".equals(candidate.phase())
+                        && candidate.hand().stream().anyMatch(card -> "PUSH".equals(card.cardType())),
+                weaver.name() + " holds a Push in era " + eraNumber);
+        var push = weaverRoundOne.hand().stream()
+                .filter(card -> "PUSH".equals(card.cardType()))
+                .findFirst()
+                .orElseThrow();
+        scenario.as(weaver)
+                .playCard(gameId, eraNumber, 1, push, pushedEvent.eventId(), null, targetOutcome(pushedEvent))
+                .assertStatus(202);
+
+        awaitEveryoneAtRound(players, gameId, eraNumber, 2);
+        scenario.as(activist)
+                .playSpecialTargetingPlayer(gameId, eraNumber, 2, "EXPOSE", weaver.playerId())
+                .assertStatus(202);
+        scenario.as(eraser)
+                .playSpecial(
+                        gameId, eraNumber, 2, "ANNIHILATE", annihilatedEvent.eventId(), targetOutcome(annihilatedEvent))
+                .assertStatus(202);
+
+        // Round 3 stays empty: its timer closes it and the era resolves.
+        return new ContestedEra(
+                eraNumber,
+                revisionist,
+                eraser,
+                activist,
+                declaredEvent.eventId(),
+                rewriteEvent.eventId(),
+                targetOutcome(rewriteEvent),
+                annihilatedEvent.eventId(),
+                targetOutcome(annihilatedEvent),
+                pushedEvent.eventId(),
+                events.stream().map(ActiveEvent::eventId).collect(Collectors.toSet()));
+    }
+
+    private void awaitEveryoneAtRound(List<Actor> players, UUID gameId, int eraNumber, int roundNumber) {
+        for (var player : players) {
+            awaitPlayerAtEraRound(player, gameId, eraNumber, roundNumber);
+        }
+    }
+
+    // The declaration window opens after the era's events are revealed and closes when Round 1 opens, so the Activist
+    // retries until the window accepts it instead of guessing when it opens.
+    private void declareRallyInsideTheWindow(Actor activist, UUID gameId, int eraNumber, ActiveEvent event) {
+        var deadline = Instant.now().plus(Duration.ofSeconds(60));
+        JsonHttpClient.Response last;
+        do {
+            last = scenario.as(activist).declareRally(gameId, eraNumber, event.eventId(), targetOutcome(event));
+            if (last.status() == 202) {
+                return;
+            }
+            sleepQuietly(Duration.ofMillis(500));
+        } while (Instant.now().isBefore(deadline));
+        throw new AssertionError("The Activist's Rally was never accepted in era " + eraNumber + ": status "
+                + last.status() + " " + last.rawBody());
+    }
+
+    private static void sleepQuietly(Duration pause) {
+        try {
+            Thread.sleep(pause);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting", e);
+        }
+    }
+
+    // Keeps the Push the Expose set-up needs, then fills with cards playable in every round.
+    private static List<UUID> chooseHandKeepingPush(List<Card> offer) {
+        var kept = new ArrayList<Card>();
+        offer.stream()
+                .filter(card -> "PUSH".equals(card.cardType()))
+                .findFirst()
+                .ifPresent(kept::add);
+        var fillers = offer.stream()
+                .filter(card -> !kept.contains(card))
+                .sorted(Comparator.comparingInt(card -> isRoundRestrictedType(card.cardType()) ? 1 : 0))
+                .limit(5L - kept.size())
+                .toList();
+        kept.addAll(fillers);
+        return kept.stream().map(Card::cardInstanceId).toList();
+    }
+
+    private void verifyContestedEraScores(UUID gameId, ContestedEra era, List<JsonNode> outcomesApplied) {
+        var eraOutcomes = outcomesApplied.stream()
+                .filter(outcome -> outcome.path("eraNumber").asInt() == era.eraNumber())
+                .collect(Collectors.toMap(
+                        outcome -> UUID.fromString(outcome.path("eventId").asText()),
+                        Function.identity(),
+                        (a, b) -> a));
+        assertThat(eraOutcomes.values())
+                .as("every OutcomeApplied of era %d carries the consequence list, empty when none", era.eraNumber())
+                .allSatisfy(outcome -> assertThat(
+                                outcome.path("consequentialErasures").isArray())
+                        .isTrue());
+
+        // Each player reads their own history: opponents' faction-identifying reasons are hidden before the reveal.
+        await().atMost(Duration.ofSeconds(60))
+                .pollInterval(Duration.ofSeconds(1))
+                .untilAsserted(() -> {
+                    var revisionistHistory = scenario.awaitScoreHistory(
+                            era.revisionist(),
+                            gameId,
+                            history -> history.eras().stream().anyMatch(e -> e.eraNumber() == era.eraNumber()),
+                            "the Revisionist's era-" + era.eraNumber() + " score history");
+                    var activistHistory = scenario.awaitScoreHistory(
+                            era.activist(),
+                            gameId,
+                            history -> history.eras().stream().anyMatch(e -> e.eraNumber() == era.eraNumber()),
+                            "the Activist's era-" + era.eraNumber() + " score history");
+                    var eraserHistory = scenario.awaitScoreHistory(
+                            era.eraser(),
+                            gameId,
+                            history -> history.eras().stream().anyMatch(e -> e.eraNumber() == era.eraNumber()),
+                            "the Eraser's era-" + era.eraNumber() + " score history");
+
+                    verifyRewriteScore(era, eraOutcomes, revisionistHistory);
+                    verifyExposeScore(era, activistHistory);
+                    verifyAnnihilateScore(era, eraOutcomes, eraserHistory);
+                });
+    }
+
+    private static void verifyRewriteScore(
+            ContestedEra era, Map<UUID, JsonNode> eraOutcomes, TemporalRiftScenario.ScoreHistory history) {
+        var won = history.deltas(era.eraNumber(), era.revisionist().playerId(), "SECRET_OUTCOME_WON");
+        var missed = history.deltas(era.eraNumber(), era.revisionist().playerId(), "SECRET_OUTCOME_MISSED");
+        var resolved = eraOutcomes.get(era.rewriteEventId());
+        if (resolved == null) {
+            // Stalled or cascaded: the Rewrite is neither a win nor a miss.
+            assertThat(won).as("Rewrite on an unresolved event wins nothing").isEmpty();
+            assertThat(missed)
+                    .as("Rewrite on an unresolved event misses nothing")
+                    .isEmpty();
+        } else if (era.rewriteOutcomeId()
+                .toString()
+                .equals(resolved.path("winningOutcomeId").asText())) {
+            assertThat(won)
+                    .as("a Rewrite that hit")
+                    .singleElement()
+                    .satisfies(delta -> assertThat(delta.pointsDelta()).isEqualTo(4));
+            assertThat(missed).as("a Rewrite that hit does not also miss").isEmpty();
+        } else {
+            assertThat(missed)
+                    .as("a Rewrite that missed carries the served SECRET_OUTCOME_MISSED penalty")
+                    .singleElement()
+                    .satisfies(delta -> assertThat(delta.pointsDelta()).isEqualTo(-1));
+            assertThat(won).as("a Rewrite that missed does not also win").isEmpty();
+        }
+    }
+
+    private static void verifyExposeScore(ContestedEra era, TemporalRiftScenario.ScoreHistory history) {
+        var exposed = history.deltas(era.eraNumber(), era.activist().playerId(), "EXPOSE_SIGNATURE_REVEALED");
+        if (era.exposedEventId().equals(era.declaredEventId())) {
+            assertThat(exposed)
+                    .as("an Expose revealing a signature on the declared event scores")
+                    .singleElement()
+                    .satisfies(delta -> assertThat(delta.pointsDelta()).isEqualTo(2));
+        } else {
+            assertThat(exposed)
+                    .as("an Expose revealing a signature on another event than the declared one scores nothing")
+                    .isEmpty();
+        }
+    }
+
+    private static void verifyAnnihilateScore(
+            ContestedEra era, Map<UUID, JsonNode> eraOutcomes, TemporalRiftScenario.ScoreHistory history) {
+        var credits = history.deltas(era.eraNumber(), era.eraser().playerId(), "ANNIHILATED_OUTCOME");
+        var resolved = eraOutcomes.get(era.annihilatedEventId());
+        var consequential = resolved != null
+                && StreamSupport.stream(resolved.path("consequentialErasures").spliterator(), false)
+                        .anyMatch(id -> era.annihilatedOutcomeId().toString().equals(id.asText()));
+        if (!consequential) {
+            assertThat(credits)
+                    .as("an erasure timeline did not list as consequential earns no Annihilate credit")
+                    .isEmpty();
+        } else {
+            // Consequential is necessary, not sufficient: the erased outcome must also have been the leader.
+            assertThat(credits).as("at most one credit for the one erasure").hasSizeLessThanOrEqualTo(1);
+            credits.forEach(delta -> assertThat(delta.pointsDelta()).isEqualTo(3));
         }
     }
 
