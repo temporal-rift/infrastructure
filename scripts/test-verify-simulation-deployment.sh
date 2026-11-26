@@ -484,8 +484,25 @@ grep -q '"game.rules.win-score-threshold":20' "$shared_rules" \
   || { echo "The shared config repository must resolve win-score-threshold 20." >&2; exit 1; }
 grep -q '"game.rules.probability.push-shift.II":20' "$shared_rules" \
   || { echo "The shared config repository must resolve push-shift.II 20." >&2; exit 1; }
+grep -q '"game.rules.victory.normal-victory":true' "$shared_rules" \
+  || { echo "The shared config repository must resolve normal-victory true." >&2; exit 1; }
+grep -q '"game.rules.victory.score-tiebreak":true' "$shared_rules" \
+  || { echo "The shared config repository must resolve score-tiebreak true next to normal-victory." >&2; exit 1; }
 [[ "$shared_digest" == "$(simulation_effective_rules_document_digest "$shared_rules")" ]] \
   || { echo "The shared config repository's canonical digest must be stable." >&2; exit 1; }
+
+# A lane override switching normal victory off stays a boolean and keeps the other victory keys.
+override_victory_root="$fixtures_dir/normal-victory-override"
+cp -r "$repo_root/config-server/config-repo" "$override_victory_root"
+sed -i 's/normal-victory: true/normal-victory: false/' "$override_victory_root/game-service.yml"
+overridden_rules="$fixtures_dir/normal-victory-override.json"
+simulation_effective_rules_document "$override_victory_root" "$overridden_rules" >/dev/null
+grep -q '"game.rules.victory.normal-victory":false' "$overridden_rules" \
+  || { echo "The normal-victory override must resolve as boolean false." >&2; exit 1; }
+grep -q '"game.rules.victory.score-tiebreak":true' "$overridden_rules" \
+  || { echo "Overriding normal-victory must keep score-tiebreak true." >&2; exit 1; }
+grep -q '"game.rules.victory.eraser-annihilations":4' "$overridden_rules" \
+  || { echo "Overriding normal-victory must keep eraser-annihilations 4." >&2; exit 1; }
 
 # A tampered effective digest fails clearly.
 sed -i "s#\"effectiveRulesDigest\": \"$expected_rules\"#\"effectiveRulesDigest\": \"$(printf '0%.0s' {1..64})\"#" "$digests_root/manifest.json"
