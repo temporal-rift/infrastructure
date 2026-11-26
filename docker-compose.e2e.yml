@@ -157,6 +157,7 @@ services:
       context: ./config-server
       secrets:
         - maven_settings
+        - github_token
     volumes:
       - ./config-server/config-repo:/config:ro
     healthcheck:
@@ -350,10 +351,14 @@ services:
       dockerfile: browser-e2e/Dockerfile
       secrets:
         - maven_settings
+        - github_token
     secrets:
       - maven_settings
     profiles: [test]
     environment:
+      # Lets the entrypoint's Maven resolve the template settings' ${env.GITHUB_TOKEN} when the
+      # maven_settings secret carries the template instead of a pre-rendered password.
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
       # Read via ${env.X} in pom.xml's failsafe systemPropertyVariables -- Compose `environment:`
       # sets OS env vars, not JVM system properties, so these can't be the browserE2e.* property
       # names directly.
@@ -384,3 +389,5 @@ volumes:
 secrets:
   maven_settings:
     environment: MAVEN_SETTINGS
+  github_token:
+    environment: GITHUB_TOKEN

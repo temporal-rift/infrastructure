@@ -7,12 +7,14 @@ From the workspace root, where this repository is a sibling of `game-service`, `
 start the stack with:
 
 ```bash
-export MAVEN_SETTINGS="$(cat ~/.m2/settings.xml)"
+export MAVEN_SETTINGS="$(cat ~/.m2/settings-github.xml)"
+export GITHUB_TOKEN="<a token with read:packages>"
 docker compose -f infrastructure/compose.yml up --build
 ```
 
-`MAVEN_SETTINGS` is your Maven user settings, passed to the image build as a secret: the timeline-service build
-resolves shared artifacts from GitHub Packages, which needs a `github` server entry holding a token with
+`MAVEN_SETTINGS` is the Maven settings template (with the password as `${env.GITHUB_TOKEN}`, never a pasted
+token), passed to the image build as a secret alongside `GITHUB_TOKEN` as a second secret: the image builds
+resolve shared artifacts from GitHub Packages, which needs a `github` server entry holding a token with
 `read:packages` even for public packages.
 
 The stack starts the three services, PostgreSQL (one database per service), Kafka, Kafka UI, Zipkin, VictoriaLogs, a
