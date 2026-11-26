@@ -62,6 +62,11 @@ jobs:
   system-e2e:
     name: system-e2e
     runs-on: ubuntu-latest
+    # The system under test builds images resolving shared artifacts from GitHub Packages, which
+    # needs a token even for public packages. The Maven settings stay a template; every Docker and
+    # Compose invocation below reads the token from here.
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     timeout-minutes: 45
 
     steps:
@@ -153,14 +158,15 @@ jobs:
           fi
 
       # Maven-built images resolve shared artifacts from GitHub Packages, which needs a token even for public packages.
+      # The settings stay a template: image builds read the token from a second secret, so no
+      # pre-rendered password is ever written here.
       - name: Provide Maven settings to image builds
         env:
           PACKAGES_USER: ${{ github.actor }}
-          PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           {
             echo 'MAVEN_SETTINGS<<MAVEN_SETTINGS_EOF'
-            printf '<settings><servers><server><id>github</id><username>%s</username><password>%s</password></server></servers></settings>\n' "$PACKAGES_USER" "$PACKAGES_TOKEN"
+            printf '<settings><servers><server><id>github</id><username>%s</username><password>${env.GITHUB_TOKEN}</password></server></servers></settings>\n' "$PACKAGES_USER"
             echo 'MAVEN_SETTINGS_EOF'
           } >> "$GITHUB_ENV"
 

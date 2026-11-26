@@ -92,6 +92,7 @@ services:
       context: ./config-server
       secrets:
         - maven_settings
+        - github_token
     volumes:
       - ./config-server/config-repo:/config:ro
     ports:
@@ -171,6 +172,7 @@ services:
       context: ../game-service
       secrets:
         - maven_settings
+        - github_token
     environment:
       <<: *local-issuer-environment
       SPRING_PROFILES_ACTIVE: docker
@@ -210,6 +212,7 @@ services:
       context: ../timeline-service
       secrets:
         - maven_settings
+        - github_token
     environment:
       <<: *local-issuer-environment
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/timeline_service
@@ -248,6 +251,7 @@ services:
       context: ../read-service
       secrets:
         - maven_settings
+        - github_token
     environment:
       <<: *local-issuer-environment
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/read_service
@@ -284,6 +288,8 @@ services:
 secrets:
   maven_settings:
     environment: MAVEN_SETTINGS
+  github_token:
+    environment: GITHUB_TOKEN
 
 volumes:
   postgres-data:
