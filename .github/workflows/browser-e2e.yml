@@ -59,6 +59,11 @@ jobs:
   browser-e2e:
     name: browser-e2e
     runs-on: ubuntu-latest
+    # Image builds and the e2e-tests container resolve shared artifacts from GitHub Packages, which
+    # needs a token even for public packages. The Maven settings stay a template; every Docker and
+    # Compose invocation below reads the token from here.
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     # Cold-cache image builds plus stack start-up (~8 min), then five deployed games on four
     # workers. Each game has a 12-minute bound; allow for the final queued scenario as well.
     timeout-minutes: 40
@@ -143,14 +148,15 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # Maven-built images resolve shared artifacts from GitHub Packages, which needs a token even for public packages.
+      # The settings stay a template: image builds read the token from a second secret, so no
+      # pre-rendered password is ever written here.
       - name: Provide Maven settings to image builds
         env:
           PACKAGES_USER: ${{ github.actor }}
-          PACKAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           {
             echo 'MAVEN_SETTINGS<<MAVEN_SETTINGS_EOF'
-            printf '<settings><servers><server><id>github</id><username>%s</username><password>%s</password></server></servers></settings>\n' "$PACKAGES_USER" "$PACKAGES_TOKEN"
+            printf '<settings><servers><server><id>github</id><username>%s</username><password>${env.GITHUB_TOKEN}</password></server></servers></settings>\n' "$PACKAGES_USER"
             echo 'MAVEN_SETTINGS_EOF'
           } >> "$GITHUB_ENV"
 

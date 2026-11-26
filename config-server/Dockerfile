@@ -3,9 +3,13 @@ WORKDIR /app
 COPY pom.xml .
 COPY .mvn .mvn
 RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml \
+    --mount=type=secret,id=github_token \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token)" \
     mvn dependency:go-offline -q -Dspotless.skip=true -Dcheckstyle.skip=true -Denforcer.skip=true
 COPY src ./src
 RUN --mount=type=secret,id=maven_settings,target=/root/.m2/settings.xml \
+    --mount=type=secret,id=github_token \
+    GITHUB_TOKEN="$(cat /run/secrets/github_token)" \
     mvn package -DskipTests -q -Dspotless.skip=true -Dcheckstyle.skip=true
 
 FROM eclipse-temurin:26

@@ -7,7 +7,8 @@ name: temporal-rift-workbench-e2e
 # then the lanes, then everything else. Nothing here is a local development default.
 #
 # Required environment: WORKBENCH_E2E_REPO (absolute path of this checkout, identical on host and in the
-# recycler), MAVEN_SETTINGS (Maven settings secret for the workbench image build).
+# recycler), MAVEN_SETTINGS (Maven settings template for the workbench image build) and GITHUB_TOKEN (the
+# GitHub Packages token the build reads from a second secret; the settings template is never pre-rendered).
 
 networks:
   default:
@@ -74,6 +75,7 @@ services:
       context: ../simulation-workbench
       secrets:
         - maven_settings
+        - github_token
     image: temporal-rift/simulation-workbench:e2e
     labels: *owner-label
     ports:
@@ -107,3 +109,5 @@ volumes:
 secrets:
   maven_settings:
     environment: MAVEN_SETTINGS
+  github_token:
+    environment: GITHUB_TOKEN
