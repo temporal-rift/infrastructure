@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -54,7 +55,7 @@ class WorkbenchRecoveryIT {
         assertThat(CASES % 100)
                 .as("recovery case count must be a multiple of 100")
                 .isZero();
-        var seeds = new java.util.ArrayList<String>();
+        var seeds = new ArrayList<String>();
         for (var seed = 1; seed <= CASES / 100; seed++) {
             seeds.add(String.valueOf(seed));
         }

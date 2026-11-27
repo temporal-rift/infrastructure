@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
 
 import tools.jackson.databind.JsonNode;
@@ -121,7 +122,7 @@ final class Workbench {
     }
 
     /** A poll that treats a failed call (a restarting service, a transient error) as "not yet". */
-    static boolean orFalse(java.util.function.BooleanSupplier poll) {
+    static boolean orFalse(BooleanSupplier poll) {
         try {
             return poll.getAsBoolean();
         } catch (RuntimeException | AssertionError _) {
