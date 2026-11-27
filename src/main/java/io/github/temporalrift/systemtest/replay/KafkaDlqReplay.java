@@ -1,13 +1,18 @@
 package io.github.temporalrift.systemtest.replay;
 
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -122,7 +127,7 @@ public final class KafkaDlqReplay {
         consumer.assign(List.of(deadLetterPartition));
         consumer.seekToBeginning(List.of(deadLetterPartition));
         var endOffset = consumer.endOffsets(List.of(deadLetterPartition)).get(deadLetterPartition);
-        var deliveries = new ArrayList<java.util.concurrent.Future<?>>();
+        var deliveries = new ArrayList<Future<?>>();
         while (consumer.position(deadLetterPartition) < endOffset) {
             for (var parkedRecord : consumer.poll(POLL_TIMEOUT).records(deadLetterPartition)) {
                 if (belongsToGame(parkedRecord, gameId)) {
@@ -156,7 +161,7 @@ public final class KafkaDlqReplay {
     private record Arguments(String bootstrapServer, String sourceTopic, String gameId, String commandConfig) {
 
         static Arguments parse(String[] args) {
-            var values = new java.util.HashMap<String, String>();
+            var values = new HashMap<String, String>();
             for (var index = 0; index < args.length; index += 2) {
                 if (index + 1 >= args.length || !args[index].startsWith("--")) {
                     throw new IllegalArgumentException("Arguments must be supplied as --name value pairs.");
@@ -179,11 +184,11 @@ public final class KafkaDlqReplay {
                     values.get(OPTION_COMMAND_CONFIG));
         }
 
-        Properties connectionProperties() throws java.io.IOException {
+        Properties connectionProperties() throws IOException {
             var properties = new Properties();
             properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, bootstrapServer);
             if (commandConfig != null) {
-                try (var input = java.nio.file.Files.newInputStream(java.nio.file.Path.of(commandConfig))) {
+                try (var input = Files.newInputStream(Path.of(commandConfig))) {
                     properties.load(input);
                 }
             }

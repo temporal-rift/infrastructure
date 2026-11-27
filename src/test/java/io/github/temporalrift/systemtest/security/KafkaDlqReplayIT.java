@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.UUID;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -42,7 +43,7 @@ class KafkaDlqReplayIT {
         consumerProperties.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ByteArrayDeserializer.class.getName());
         try (var consumer = new KafkaConsumer<byte[], byte[]>(consumerProperties)) {
             consumer.subscribe(List.of("game.events"));
-            var records = new ArrayList<org.apache.kafka.clients.consumer.ConsumerRecord<byte[], byte[]>>();
+            var records = new ArrayList<ConsumerRecord<byte[], byte[]>>();
             await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
                 consumer.poll(Duration.ofMillis(500)).forEach(records::add);
                 assertThat(records).anySatisfy(consumerRecord -> {
@@ -88,8 +89,7 @@ class KafkaDlqReplayIT {
         }
     }
 
-    private static String headerValue(
-            org.apache.kafka.clients.consumer.ConsumerRecord<byte[], byte[]> consumerRecord, String key) {
+    private static String headerValue(ConsumerRecord<byte[], byte[]> consumerRecord, String key) {
         var header = consumerRecord.headers().lastHeader(key);
         return header == null ? null : new String(header.value(), StandardCharsets.UTF_8);
     }

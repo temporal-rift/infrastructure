@@ -8,6 +8,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Map;
 
 import tools.jackson.databind.JsonNode;
@@ -69,7 +70,7 @@ final class Http {
     }
 
     static String form(Map<String, String> fields) {
-        var parts = new java.util.ArrayList<String>();
+        var parts = new ArrayList<String>();
         fields.forEach((name, value) -> parts.add(URLEncoder.encode(name, StandardCharsets.UTF_8) + "="
                 + URLEncoder.encode(value, StandardCharsets.UTF_8)));
         return String.join("&", parts);

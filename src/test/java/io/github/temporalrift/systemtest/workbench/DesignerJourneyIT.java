@@ -18,6 +18,7 @@ import com.microsoft.playwright.Playwright;
 import com.microsoft.playwright.Route;
 import com.microsoft.playwright.assertions.LocatorAssertions;
 import com.microsoft.playwright.options.AriaRole;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -104,7 +105,7 @@ class DesignerJourneyIT {
         assertThat(page.getByRole(AriaRole.TABLE, new Page.GetByRoleOptions().setName("Case counts")))
                 .containsText("6");
         var runId = Pattern.compile("/runs/([0-9a-f-]{36})").matcher(page.url());
-        org.assertj.core.api.Assertions.assertThat(runId.find()).as(page.url()).isTrue();
+        Assertions.assertThat(runId.find()).as(page.url()).isTrue();
 
         // The report is complete, and its CSV export is exactly what the service returned.
         click(AriaRole.LINK, "Report");
@@ -119,9 +120,7 @@ class DesignerJourneyIT {
             route.fulfill(new Route.FulfillOptions().setResponse(response));
         });
         var download = page.waitForDownload(() -> click("Export CSV"));
-        org.assertj.core.api.Assertions.assertThat(Files.readAllBytes(download.path()))
-                .isNotEmpty()
-                .isEqualTo(served.get());
+        Assertions.assertThat(Files.readAllBytes(download.path())).isNotEmpty().isEqualTo(served.get());
 
         // Compare the two variants of the run.
         click(AriaRole.LINK, "Comparisons");
